@@ -1,0 +1,6 @@
+{
+  "name": "Enterweb Slinger",
+  "description": "OmniNet Analyzer - High-performance network diagnostic dashboard, LAN scanner, port scanner, speed test, traceroute, and Wi-Fi analyzer.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

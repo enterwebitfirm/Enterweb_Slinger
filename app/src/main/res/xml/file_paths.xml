@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Scoped storage paths for exported diagnostic reports and downloaded network files -->
+    <cache-path name="reports" path="reports/" />
+    <cache-path name="shared_files" path="." />
+    <files-path name="internal_files" path="." />
+</paths>
