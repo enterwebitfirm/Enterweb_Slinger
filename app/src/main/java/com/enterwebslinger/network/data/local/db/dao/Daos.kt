@@ -7,8 +7,10 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
+import com.enterwebslinger.network.data.local.db.entities.AuditReportEntity
 import com.enterwebslinger.network.data.local.db.entities.DiscoveredDeviceEntity
 import com.enterwebslinger.network.data.local.db.entities.HostWatchLogEntity
+import com.enterwebslinger.network.data.local.db.entities.SavedAaaServerEntity
 import com.enterwebslinger.network.data.local.db.entities.SavedEndpointProfileEntity
 import com.enterwebslinger.network.data.local.db.entities.ScanHistoryEntity
 import com.enterwebslinger.network.data.local.db.entities.SyslogEventEntity
@@ -109,3 +111,41 @@ interface EndpointProfileDao {
     @Query("DELETE FROM saved_endpoint_profiles WHERE id = :id")
     suspend fun deleteProfileById(id: Long)
 }
+
+@Dao
+interface AaaServerProfileDao {
+    @Query("SELECT * FROM saved_aaa_servers ORDER BY lastUsedTimestamp DESC")
+    fun getAllServersFlow(): Flow<List<SavedAaaServerEntity>>
+
+    @Query("SELECT * FROM saved_aaa_servers WHERE host = :host LIMIT 1")
+    suspend fun findByHost(host: String): SavedAaaServerEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertServer(server: SavedAaaServerEntity): Long
+
+    @Update
+    suspend fun updateServer(server: SavedAaaServerEntity)
+
+    @Delete
+    suspend fun deleteServer(server: SavedAaaServerEntity)
+
+    @Query("DELETE FROM saved_aaa_servers WHERE id = :id")
+    suspend fun deleteServerById(id: Long)
+}
+
+@Dao
+interface AuditReportDao {
+    @Query("SELECT * FROM audit_reports ORDER BY timestamp DESC LIMIT :limit")
+    fun getRecentReportsFlow(limit: Int = 100): Flow<List<AuditReportEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertReport(report: AuditReportEntity): Long
+
+    @Query("DELETE FROM audit_reports WHERE id = :id")
+    suspend fun deleteReportById(id: Long)
+
+    @Query("DELETE FROM audit_reports")
+    suspend fun clearAllReports()
+}
+
+

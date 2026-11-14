@@ -78,14 +78,18 @@ import com.enterwebslinger.network.ui.navigation.AppNavHost
 import com.enterwebslinger.network.ui.navigation.BottomNavDestinations
 import com.enterwebslinger.network.ui.navigation.Screen
 import com.enterwebslinger.network.ui.navigation.navigateSingleTopTo
+import com.enterwebslinger.network.ui.screens.aaa.AaaIdentityViewModel
 import com.enterwebslinger.network.ui.screens.ai.AiAssistantViewModel
 import com.enterwebslinger.network.ui.screens.dashboard.DashboardViewModel
 import com.enterwebslinger.network.ui.screens.datacenter.DataCenterViewModel
 import com.enterwebslinger.network.ui.screens.diagnostics.DiagnosticsViewModel
 import com.enterwebslinger.network.ui.screens.engineering.EngineeringViewModel
 import com.enterwebslinger.network.ui.screens.enterprise.EnterpriseViewModel
+import com.enterwebslinger.network.ui.screens.firewall.FirewallViewModel
 import com.enterwebslinger.network.ui.screens.iot.IotApiWorkbenchViewModel
 import com.enterwebslinger.network.ui.screens.lanscanner.LanScannerViewModel
+import com.enterwebslinger.network.ui.screens.protoolkit.ProToolkitViewModel
+import com.enterwebslinger.network.ui.screens.rffield.RfFieldViewModel
 import com.enterwebslinger.network.ui.screens.security.SecurityViewModel
 import com.enterwebslinger.network.ui.screens.vpn.VpnViewModel
 import com.enterwebslinger.network.ui.screens.wifi.WifiSpeedViewModel
@@ -156,8 +160,12 @@ class MainActivity : ComponentActivity() {
                     val enterpriseViewModel: EnterpriseViewModel = viewModel(factory = appContainer.viewModelFactory)
                     val dataCenterViewModel: DataCenterViewModel = viewModel(factory = appContainer.viewModelFactory)
                     val vpnViewModel: VpnViewModel = viewModel(factory = appContainer.viewModelFactory)
+                    val firewallViewModel: FirewallViewModel = viewModel(factory = appContainer.viewModelFactory)
+                    val aaaIdentityViewModel: AaaIdentityViewModel = viewModel(factory = appContainer.viewModelFactory)
                     val iotApiViewModel: IotApiWorkbenchViewModel = viewModel(factory = appContainer.viewModelFactory)
                     val engineeringViewModel: EngineeringViewModel = viewModel(factory = appContainer.viewModelFactory)
+                    val rfFieldViewModel: RfFieldViewModel = viewModel(factory = appContainer.viewModelFactory)
+                    val proToolkitViewModel: ProToolkitViewModel = viewModel(factory = appContainer.viewModelFactory)
 
                     RequestNetworkPermissions(
                         onPermissionsChecked = {
@@ -261,8 +269,12 @@ class MainActivity : ComponentActivity() {
                                 enterpriseViewModel = enterpriseViewModel,
                                 dataCenterViewModel = dataCenterViewModel,
                                 vpnViewModel = vpnViewModel,
+                                firewallViewModel = firewallViewModel,
+                                aaaIdentityViewModel = aaaIdentityViewModel,
                                 iotApiViewModel = iotApiViewModel,
                                 engineeringViewModel = engineeringViewModel,
+                                rfFieldViewModel = rfFieldViewModel,
+                                proToolkitViewModel = proToolkitViewModel,
                                 onOpenAiChat = { showAiChatModal = true }
                             )
 
@@ -291,11 +303,15 @@ class MainActivity : ComponentActivity() {
                                                     }
                                                     dataCenterViewModel.setSelectedSection(mappedSection)
                                                 }
-                                                Screen.VpnWorkbench.route -> {}
+                                                Screen.VpnWorkbench.route -> vpnViewModel.setSelectedTab(tabIdx)
+                                                Screen.FirewallHub.route -> firewallViewModel.setSelectedTab(tabIdx)
+                                                Screen.AaaIdentity.route -> aaaIdentityViewModel.setSelectedTab(tabIdx)
                                                 Screen.IotApiWorkbench.route -> iotApiViewModel.setSelectedTab(tabIdx)
                                                 Screen.Diagnostics.route -> diagnosticsViewModel.setSelectedTab(tabIdx)
                                                 Screen.Security.route -> securityViewModel.setSelectedTab(tabIdx)
                                                 Screen.WifiSpeed.route -> wifiSpeedViewModel.setSelectedTab(tabIdx)
+                                                Screen.RfField.route -> rfFieldViewModel.setSelectedTab(tabIdx)
+                                                Screen.ProToolkit.route -> proToolkitViewModel.setSelectedTab(tabIdx)
                                             }
                                         }
                                     }

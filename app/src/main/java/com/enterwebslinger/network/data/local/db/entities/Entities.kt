@@ -69,3 +69,36 @@ data class SavedEndpointProfileEntity(
     val extraConfigJson: String = "{}",
     val lastUsedTimestamp: Long = System.currentTimeMillis()
 )
+
+@Entity(tableName = "saved_aaa_servers")
+data class SavedAaaServerEntity(
+    @PrimaryKey(autoGenerate = true)
+    val id: Long = 0,
+    val name: String,
+    val kind: String,
+    val host: String,
+    val port: Int,
+    val username: String = "",
+    val nasIp: String = "127.0.0.1",
+    val nasIdentifier: String = "EnterwebSlinger",
+    val baseDn: String = "",
+    val useTls: Boolean = false,
+    val allowSelfSignedTls: Boolean = true,
+    val credentialVaultKey: String = "",
+    val lastUsedTimestamp: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "audit_reports")
+data class AuditReportEntity(
+    @PrimaryKey(autoGenerate = true)
+    val id: Long = 0,
+    val timestamp: Long = System.currentTimeMillis(),
+    val targetLabel: String,
+    val category: String,
+    val healthScore: Int = 0,
+    val severity: String = "INFO",
+    val summary: String,
+    val reportJson: String = "{}"
+)
+
+

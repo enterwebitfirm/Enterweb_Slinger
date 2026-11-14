@@ -117,16 +117,48 @@ val AllCommandTools = listOf(
     CommandToolItem("dc_hyperv", "Hyper-V & WinRM WS-Management", "Data Center", "Windows Admin Center and Hyper-V VM inspect over WS-Man", "data_center", 3, Icons.Default.Dns),
     CommandToolItem("dc_cucm", "Cisco CUCM & IP Phone Manager", "Data Center", "AXL SOAP client and IP Phone XML execution", "data_center", 4, Icons.Default.PhoneInTalk),
 
-    // VPN Tunnel Workbench
+    // VPN Tunnel Workbench & PCAP
     CommandToolItem("vpn_wireguard", "WireGuard Tunnel Client", "VPN Workbench", "Import .conf or QR codes for high-speed userspace WireGuard TUN", "vpn_workbench", 0, Icons.Default.VpnKey),
-    CommandToolItem("vpn_openvpn", "OpenVPN 3 Tunnel Client", "VPN Workbench", "Parse .ovpn profiles with TLS certs and tunnel routing", "vpn_workbench", 1, Icons.Default.VpnKey),
-    CommandToolItem("vpn_ipsec", "Native Android IKEv2 / IPsec", "VPN Workbench", "Hardware-accelerated OS-level IPsec profile provisioning", "vpn_workbench", 2, Icons.Default.VpnKey),
-    CommandToolItem("vpn_sstp", "SSTP & SSL-VPN Client", "VPN Workbench", "HTTPS port 443 SSL-VPN and L2TP tunnel configuration", "vpn_workbench", 3, Icons.Default.VpnKey),
+    CommandToolItem("vpn_wg_keygen", "WireGuard Keygen, QR & AllowedIPs", "VPN Workbench", "Generate Curve25519 keys, compute CIDR AllowedIPs & import QR/PKCS#12", "vpn_workbench", 1, Icons.Default.VpnKey),
+    CommandToolItem("vpn_openvpn", "OpenVPN & PKCS#12 Tunnel Client", "VPN Workbench", "Parse .ovpn w/ tls-crypt/SHA512 & unlock .p12/.pfx X.509 bundles", "vpn_workbench", 1, Icons.Default.VpnKey),
+    CommandToolItem("vpn_ipsec", "Native Android IKEv2 / IPsec (PSK/EAP/RSA)", "VPN Workbench", "Hardware-accelerated OS-level IKEv2 provisioning with X.509 RSA", "vpn_workbench", 1, Icons.Default.VpnKey),
+    CommandToolItem("vpn_sstp", "AnyConnect, FortiClient, SSTP & L2TP Probes", "VPN Workbench", "HTTPS <config-auth>, /remote/info, SSTP_DUPLEX_POST & L2TP portal probes", "vpn_workbench", 2, Icons.Default.VpnKey),
+    CommandToolItem("vpn_ike_probe", "IKEv2 SA_INIT (UDP 500 & NAT-T 4500)", "VPN Workbench", "Live RFC 7296/3948 peer handshake & NO_PROPOSAL_CHOSEN analyzer", "vpn_workbench", 2, Icons.Default.Lock),
+    CommandToolItem("vpn_mss_calc", "Tunnel Overhead & TCP MSS Calculator", "VPN Workbench", "Compute IPsec/XFRM/GRE/WireGuard/VXLAN MTU & ip tcp adjust-mss", "vpn_workbench", 2, Icons.Default.Calculate),
+    CommandToolItem("vpn_leak_audit", "DNS, IPv6, Route Table & Per-App Audit", "VPN Workbench", "Inspect active routes, IPv6 leak risk & Per-App split-tunnel bypass", "vpn_workbench", 3, Icons.Default.Security),
+    CommandToolItem("pcap_sniffer", "Local TUN PCAP Sniffer (Wireshark)", "VPN Workbench", "Capture L3/L4 headers into LINKTYPE_RAW .pcap and export via FileProvider", "vpn_workbench", 4, Icons.Default.Terminal),
+
+    // Multi-Vendor Firewall Hub
+    CommandToolItem("fw_hub_overview", "Multi-Vendor Firewall Hub", "Firewall Hub", "Sophos XG/XGS, FortiGate, Palo Alto PAN-OS, Cisco ASA & pfSense/OPNsense", "firewall_hub", 0, Icons.Default.Security),
+    CommandToolItem("fw_ipsec_xfrm", "Firewall IPsec / XFRM & Bounce Control", "Firewall Hub", "Monitor tunnel SPIs & bounce/toggle Sophos or FortiGate Phase-2 SAs", "firewall_hub", 1, Icons.Default.VpnKey),
+    CommandToolItem("fw_policy_packet", "PAN-OS Policy Match & ASA Packet-Tracer", "Firewall Hub", "Interactive security/NAT rule match, ASA packet-tracer & FortiGate zero-hit audit", "firewall_hub", 2, Icons.Default.Terminal),
+    CommandToolItem("fw_drops_backup", "Sophos drppkt Logs & Config Backup", "Firewall Hub", "Live Sophos packet drop filter & FortiGate/SFOS configuration backups", "firewall_hub", 3, Icons.Default.Dns),
+
+    // AAA, RADIUS, TACACS+ & Active Directory Workbench
+    CommandToolItem("aaa_radius_auth_vsa", "RADIUS Auth Workbench (PAP/CHAP/MS-CHAPv2)", "AAA & Identity", "RFC 2865 Auth + Message-Authenticator (80), 802.1X VLAN & MikroTik/Cisco/Sophos/Forti VSAs", "aaa_identity", 0, Icons.Default.Lock),
+    CommandToolItem("aaa_radius_acct_coa", "RADIUS Accounting, CoA/PoD & Local Listener", "AAA & Identity", "RFC 2866 Start/Stop/Interim, RFC 5176 CoA/Disconnect & UDP 3799 NAS CoA listener", "aaa_identity", 1, Icons.Default.Timeline),
+    CommandToolItem("aaa_tacacs_rfc8907", "TACACS+ Client (RFC 8907 TCP 49)", "AAA & Identity", "MD5 obfuscated Authentication & Cisco/Juniper Command Authorization testing", "aaa_identity", 2, Icons.Default.Terminal),
+    CommandToolItem("aaa_ldap_ad", "LDAP & Active Directory Tester (389 / 636)", "AAA & Identity", "RFC 4511 ASN.1 BER Simple/UPN Bind & BaseDN SearchResult memberOf inspector", "aaa_identity", 3, Icons.Default.Security),
 
     // IoT & API Workbench
     CommandToolItem("iot_mqtt", "MQTT 3.1.1 / 5.0 Workbench", "IoT & APIs", "Subscribe and publish to MQTT brokers with QoS levels", "iot_api_workbench", 0, Icons.Default.Sensors),
     CommandToolItem("iot_coap", "CoAP Client (RFC 7252 UDP 5683)", "IoT & APIs", "Send CoAP GET/POST/PUT/DELETE datagrams to IoT devices", "iot_api_workbench", 1, Icons.Default.Sensors),
     CommandToolItem("iot_api_tester", "Universal REST & SOAP API Tester", "IoT & APIs", "Execute HTTP REST calls, SOAP 1.1/1.2 XML envelopes, inspect headers", "iot_api_workbench", 2, Icons.Default.Public),
+
+    // RF Survey, BLE, Cellular & Security Audit
+    CommandToolItem("rf_floorplan_heatmap", "Wi-Fi Floorplan Signal Heatmap", "RF & Audit", "Interactive 2D RSSI pin mapping with step walk sensor & PNG export", "rf_field", 0, Icons.Default.WifiFind),
+    CommandToolItem("ble_beacon_scanner", "BLE Bluetooth Beacon Scanner", "RF & Audit", "Scan advertising service UUIDs, TX power, RSSI & distance estimates", "rf_field", 1, Icons.Default.Sensors),
+    CommandToolItem("cellular_5g_lte", "5G NR / LTE Cellular RF Telemetry", "RF & Audit", "Inspect NR/LTE NCI, PCI, TAC, ARFCN, RSRP, RSRQ, SINR & neighbors", "rf_field", 2, Icons.Default.Sensors),
+    CommandToolItem("onvif_camera_discovery", "ONVIF & RTSP Camera Discovery", "RF & Audit", "WS-Discovery (239.255.255.250:3702) & TCP 554/8000/37777 probe", "rf_field", 3, Icons.Default.Security),
+    CommandToolItem("evil_twin_auditor", "Evil Twin & Rogue AP Security Auditor", "RF & Audit", "Detect unknown BSSIDs, WPA3 downgrades & hidden overlapping channels", "rf_field", 3, Icons.Default.Security),
+
+    // ISP & Protocol Pro Toolkit
+    CommandToolItem("pmtud_auditor", "Path MTU Discovery (PMTUD) & MSS", "Pro Tools", "Binary search 576–1500 B DF ping & WireGuard/PPPoE/IPsec/VXLAN MSS", "pro_toolkit", 0, Icons.Default.Speed),
+    CommandToolItem("dns_dnssec_benchmark", "Concurrent DNS & DNSSEC Benchmark", "Pro Tools", "Race Active DNS, 1.1.1.1, 8.8.8.8, 9.9.9.9, OpenDNS with DO/AD check", "pro_toolkit", 1, Icons.Default.Dns),
+    CommandToolItem("happy_eyeballs_alpn", "Happy Eyeballs & ALPN h2/h3 Tester", "Pro Tools", "RFC 8305 IPv6 vs IPv4 connect race, TLS ALPN h2 & Alt-Svc h3 inspection", "pro_toolkit", 1, Icons.Default.Public),
+    CommandToolItem("aaa_radius_tacacs", "RADIUS & TACACS+ AAA Tester", "Pro Tools", "RFC 2865 Access-Request + VSA (Type 26) & TACACS+ TCP 49 probe", "pro_toolkit", 2, Icons.Default.Lock),
+    CommandToolItem("batch_ssh_traffic_stats", "Multi-Host SSH Batch & TrafficStats", "Pro Tools", "Concurrent SSHJ automation + config diff + real-time Rx/Tx byte/pkt chart", "pro_toolkit", 3, Icons.Default.Terminal),
+    CommandToolItem("scheduled_audit_worker", "Background Network Audit Worker", "Pro Tools", "WorkManager 15m–6h monitor alerting on rogue MACs & offline watched hosts", "pro_toolkit", 4, Icons.Default.Timeline),
 
     // Engineering Utilities Hub
     CommandToolItem("eng_mac_arp", "IEEE OUI MAC & ARP Cache Inspector", "Engineering Utilities", "Lookup MAC vendor, detect randomized MAC bit-1, read /proc/net/arp", "engineering_utils", 0, Icons.Default.Devices),

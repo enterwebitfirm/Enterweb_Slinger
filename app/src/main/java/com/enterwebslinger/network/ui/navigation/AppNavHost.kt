@@ -7,18 +7,23 @@ import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material.icons.filled.Engineering
 import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Timeline
+import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material.icons.filled.VpnKey
+import androidx.compose.material.icons.filled.WifiFind
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import com.enterwebslinger.network.ui.screens.aaa.AaaIdentityScreen
+import com.enterwebslinger.network.ui.screens.aaa.AaaIdentityViewModel
 import com.enterwebslinger.network.ui.screens.ai.AiAssistantScreen
 import com.enterwebslinger.network.ui.screens.ai.AiAssistantViewModel
 import com.enterwebslinger.network.ui.screens.dashboard.DashboardScreen
@@ -31,10 +36,16 @@ import com.enterwebslinger.network.ui.screens.engineering.EngineeringUtilitiesSc
 import com.enterwebslinger.network.ui.screens.engineering.EngineeringViewModel
 import com.enterwebslinger.network.ui.screens.enterprise.EnterpriseHubScreen
 import com.enterwebslinger.network.ui.screens.enterprise.EnterpriseViewModel
+import com.enterwebslinger.network.ui.screens.firewall.FirewallHubScreen
+import com.enterwebslinger.network.ui.screens.firewall.FirewallViewModel
 import com.enterwebslinger.network.ui.screens.iot.IotApiWorkbenchScreen
 import com.enterwebslinger.network.ui.screens.iot.IotApiWorkbenchViewModel
 import com.enterwebslinger.network.ui.screens.lanscanner.LanScannerScreen
 import com.enterwebslinger.network.ui.screens.lanscanner.LanScannerViewModel
+import com.enterwebslinger.network.ui.screens.protoolkit.ProToolkitScreen
+import com.enterwebslinger.network.ui.screens.protoolkit.ProToolkitViewModel
+import com.enterwebslinger.network.ui.screens.rffield.RfFieldScreen
+import com.enterwebslinger.network.ui.screens.rffield.RfFieldViewModel
 import com.enterwebslinger.network.ui.screens.security.SecurityScreen
 import com.enterwebslinger.network.ui.screens.security.SecurityViewModel
 import com.enterwebslinger.network.ui.screens.vpn.VpnViewModel
@@ -104,6 +115,20 @@ sealed class Screen(
         testTag = "nav_vpn"
     )
 
+    data object FirewallHub : Screen(
+        route = "firewall_hub",
+        title = "Firewalls",
+        icon = Icons.Default.Security,
+        testTag = "nav_firewall_hub"
+    )
+
+    data object AaaIdentity : Screen(
+        route = "aaa_identity",
+        title = "AAA / AD",
+        icon = Icons.Default.VerifiedUser,
+        testTag = "nav_aaa_identity"
+    )
+
     data object IotApiWorkbench : Screen(
         route = "iot_api_workbench",
         title = "IoT & APIs",
@@ -116,6 +141,20 @@ sealed class Screen(
         title = "Eng Tools",
         icon = Icons.Default.Build,
         testTag = "nav_engineering"
+    )
+
+    data object RfField : Screen(
+        route = "rf_field",
+        title = "RF & Audit",
+        icon = Icons.Default.WifiFind,
+        testTag = "nav_rf_field"
+    )
+
+    data object ProToolkit : Screen(
+        route = "pro_toolkit",
+        title = "Pro Tools",
+        icon = Icons.Default.Engineering,
+        testTag = "nav_pro_toolkit"
     )
 
     data object AiAssistant : Screen(
@@ -132,9 +171,13 @@ val BottomNavDestinations = listOf(
     Screen.Diagnostics,
     Screen.Security,
     Screen.WifiSpeed,
+    Screen.RfField,
+    Screen.ProToolkit,
     Screen.EnterpriseNoc,
     Screen.DataCenter,
     Screen.VpnWorkbench,
+    Screen.FirewallHub,
+    Screen.AaaIdentity,
     Screen.IotApiWorkbench,
     Screen.EngineeringUtils
 )
@@ -163,8 +206,12 @@ fun AppNavHost(
     enterpriseViewModel: EnterpriseViewModel,
     dataCenterViewModel: DataCenterViewModel,
     vpnViewModel: VpnViewModel,
+    firewallViewModel: FirewallViewModel,
+    aaaIdentityViewModel: AaaIdentityViewModel,
     iotApiViewModel: IotApiWorkbenchViewModel,
     engineeringViewModel: EngineeringViewModel,
+    rfFieldViewModel: RfFieldViewModel,
+    proToolkitViewModel: ProToolkitViewModel,
     onOpenAiChat: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -234,6 +281,23 @@ fun AppNavHost(
         composable(Screen.VpnWorkbench.route) {
             VpnWorkbenchScreen(
                 viewModel = vpnViewModel,
+                aiViewModel = aiAssistantViewModel,
+                onBack = navigateBackToDashboard
+            )
+        }
+
+        composable(Screen.FirewallHub.route) {
+            FirewallHubScreen(
+                viewModel = firewallViewModel,
+                aiViewModel = aiAssistantViewModel,
+                onBack = navigateBackToDashboard
+            )
+        }
+
+        composable(Screen.AaaIdentity.route) {
+            AaaIdentityScreen(
+                viewModel = aaaIdentityViewModel,
+                aiViewModel = aiAssistantViewModel,
                 onBack = navigateBackToDashboard
             )
         }
@@ -248,6 +312,20 @@ fun AppNavHost(
         composable(Screen.EngineeringUtils.route) {
             EngineeringUtilitiesScreen(
                 viewModel = engineeringViewModel,
+                onBack = navigateBackToDashboard
+            )
+        }
+
+        composable(Screen.RfField.route) {
+            RfFieldScreen(
+                viewModel = rfFieldViewModel,
+                onBack = navigateBackToDashboard
+            )
+        }
+
+        composable(Screen.ProToolkit.route) {
+            ProToolkitScreen(
+                viewModel = proToolkitViewModel,
                 onBack = navigateBackToDashboard
             )
         }

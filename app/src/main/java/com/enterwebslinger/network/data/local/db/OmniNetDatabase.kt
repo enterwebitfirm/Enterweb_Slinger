@@ -5,13 +5,17 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import com.enterwebslinger.network.data.local.db.dao.AaaServerProfileDao
+import com.enterwebslinger.network.data.local.db.dao.AuditReportDao
 import com.enterwebslinger.network.data.local.db.dao.DeviceDao
 import com.enterwebslinger.network.data.local.db.dao.EndpointProfileDao
 import com.enterwebslinger.network.data.local.db.dao.HostWatchDao
 import com.enterwebslinger.network.data.local.db.dao.ScanHistoryDao
 import com.enterwebslinger.network.data.local.db.dao.SyslogDao
+import com.enterwebslinger.network.data.local.db.entities.AuditReportEntity
 import com.enterwebslinger.network.data.local.db.entities.DiscoveredDeviceEntity
 import com.enterwebslinger.network.data.local.db.entities.HostWatchLogEntity
+import com.enterwebslinger.network.data.local.db.entities.SavedAaaServerEntity
 import com.enterwebslinger.network.data.local.db.entities.SavedEndpointProfileEntity
 import com.enterwebslinger.network.data.local.db.entities.ScanHistoryEntity
 import com.enterwebslinger.network.data.local.db.entities.SyslogEventEntity
@@ -22,9 +26,11 @@ import com.enterwebslinger.network.data.local.db.entities.SyslogEventEntity
         ScanHistoryEntity::class,
         HostWatchLogEntity::class,
         SyslogEventEntity::class,
-        SavedEndpointProfileEntity::class
+        SavedEndpointProfileEntity::class,
+        SavedAaaServerEntity::class,
+        AuditReportEntity::class
     ],
-    version = 1,
+    version = 3,
     exportSchema = false
 )
 abstract class OmniNetDatabase : RoomDatabase() {
@@ -33,6 +39,8 @@ abstract class OmniNetDatabase : RoomDatabase() {
     abstract fun hostWatchDao(): HostWatchDao
     abstract fun syslogDao(): SyslogDao
     abstract fun endpointProfileDao(): EndpointProfileDao
+    abstract fun aaaServerProfileDao(): AaaServerProfileDao
+    abstract fun auditReportDao(): AuditReportDao
 
     companion object {
         @Volatile

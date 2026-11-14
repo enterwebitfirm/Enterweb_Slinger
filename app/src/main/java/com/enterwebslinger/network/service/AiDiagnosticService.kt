@@ -4,15 +4,26 @@ package com.enterwebslinger.network.service
 import android.content.Context
 import android.util.Log
 import com.enterwebslinger.network.core.util.NetworkUtils
+import com.enterwebslinger.network.data.protocol.PcapCaptureEngine
+import com.enterwebslinger.network.data.repository.AaaDiagnosticsRepository
+import com.enterwebslinger.network.data.repository.AdvancedProtocolRepository
+import com.enterwebslinger.network.data.repository.BatchAutomationRepository
+import com.enterwebslinger.network.data.repository.CellularTelemetryRepository
 import com.enterwebslinger.network.data.repository.CoreProtocolsRepository
 import com.enterwebslinger.network.data.repository.DiagnosticsRepository
+import com.enterwebslinger.network.data.repository.EnterpriseIdentityRepository
+import com.enterwebslinger.network.data.repository.EnterpriseVpnRepository
+import com.enterwebslinger.network.data.repository.FirewallManagementRepository
 import com.enterwebslinger.network.data.repository.FlowCollectorRepository
 import com.enterwebslinger.network.data.repository.IotProtocolsRepository
 import com.enterwebslinger.network.data.repository.LanScannerRepository
+import com.enterwebslinger.network.data.repository.LanSecurityAuditRepository
+import com.enterwebslinger.network.data.repository.MtuDiscoveryRepository
 import com.enterwebslinger.network.data.repository.NetworkInfoRepository
 import com.enterwebslinger.network.data.repository.NetworkTelemetryAggregator
 import com.enterwebslinger.network.data.repository.NmapFingerprintEngine
 import com.enterwebslinger.network.data.repository.OobHardwareRepository
+import com.enterwebslinger.network.data.repository.RadiusAndAaaRepository
 import com.enterwebslinger.network.data.repository.SecurityRepository
 import com.enterwebslinger.network.data.repository.SnmpRepository
 import com.enterwebslinger.network.data.repository.TerminalAndNetOsRepository
@@ -22,7 +33,10 @@ import com.enterwebslinger.network.data.repository.WifiSpeedRepository
 import com.enterwebslinger.network.domain.model.AiAuditFinding
 import com.enterwebslinger.network.domain.model.AiAuditReport
 import com.enterwebslinger.network.domain.model.DiscoveredDevice
+import com.enterwebslinger.network.domain.model.FirewallVendor
 import com.enterwebslinger.network.domain.model.HttpMethod
+import com.enterwebslinger.network.domain.model.RadiusAuthProtocol
+import com.enterwebslinger.network.domain.model.RadiusAuthRequestConfig
 import com.enterwebslinger.network.domain.model.ScanProfile
 import com.enterwebslinger.network.domain.model.SnmpTargetConfig
 import com.enterwebslinger.network.domain.model.SnmpVersion
@@ -71,7 +85,18 @@ class AiDiagnosticService(
     private val iotProtocolsRepository: IotProtocolsRepository? = null,
     private val vpnRepository: VpnRepository? = null,
     private val webServicesRepository: WebServicesRepository? = null,
-    private val coreProtocolsRepository: CoreProtocolsRepository? = null
+    private val coreProtocolsRepository: CoreProtocolsRepository? = null,
+    private val mtuDiscoveryRepository: MtuDiscoveryRepository? = null,
+    private val advancedProtocolRepository: AdvancedProtocolRepository? = null,
+    private val lanSecurityAuditRepository: LanSecurityAuditRepository? = null,
+    private val cellularTelemetryRepository: CellularTelemetryRepository? = null,
+    private val aaaDiagnosticsRepository: AaaDiagnosticsRepository? = null,
+    private val pcapCaptureEngine: PcapCaptureEngine? = null,
+    private val batchAutomationRepository: BatchAutomationRepository? = null,
+    private val firewallManagementRepository: FirewallManagementRepository? = null,
+    private val enterpriseVpnRepository: EnterpriseVpnRepository? = null,
+    private val radiusAndAaaRepository: RadiusAndAaaRepository? = null,
+    private val enterpriseIdentityRepository: EnterpriseIdentityRepository? = null
 ) {
     private val systemInstructionText = """
         You are a Principal Wireless & Network Diagnostics Engineer. Analyze raw Android network telemetry accurately. Distinguish between Wi-Fi PHY/RF interference, local router bufferbloat, benign ISP ICMP deprioritization on intermediate traceroute hops, DNS resolution bottlenecks, and LAN security risks.
@@ -252,6 +277,135 @@ class AiDiagnosticService(
         )
     )
 
+    private val pathMtuToolDeclaration = FunctionDeclaration(
+        name = "runPathMtuDiscovery",
+        description = "Discovers exact end-to-end Path MTU between 576 and 1500 bytes and recommends WireGuard/PPPoE/IPsec/VXLAN MSS clamping values.",
+        parameters = mapOf(
+            "targetHost" to Schema.string(description = "Destination host or IP address to probe with DF flag")
+        )
+    )
+
+    private val dnsAndAlpnBenchmarkToolDeclaration = FunctionDeclaration(
+        name = "runDnsAndHttp3Benchmark",
+        description = "Benchmarks DNS resolvers with DNSSEC AD check and tests Happy Eyeballs IPv6/IPv4 + TLS ALPN h2/h3 support on a host.",
+        parameters = mapOf(
+            "domain" to Schema.string(description = "Domain or HTTPS hostname (e.g. cloudflare.com)")
+        )
+    )
+
+    private val onvifAndEvilTwinToolDeclaration = FunctionDeclaration(
+        name = "scanOnvifOrEvilTwin",
+        description = "Discovers ONVIF/RTSP security cameras via WS-Discovery multicast or audits Wi-Fi scan results for Evil Twin / Rogue AP downgrades.",
+        parameters = mapOf(
+            "auditType" to Schema.enumeration(listOf("ONVIF", "EVIL_TWIN"), description = "Security audit type")
+        )
+    )
+
+    private val cellularTelemetryToolDeclaration = FunctionDeclaration(
+        name = "inspectCellularSignal",
+        description = "Reads live 5G NR / 4G LTE cellular RF telemetry (Operator, NCI/CI, PCI, TAC, ARFCN, RSRP, RSRQ, SINR, neighbors).",
+        parameters = emptyMap()
+    )
+
+    private val trafficAndPcapSummaryToolDeclaration = FunctionDeclaration(
+        name = "getTrafficAndPcapSummary",
+        description = "Returns live TrafficStats RX/TX rates and current Loopback PCAP sniffer capture counts.",
+        parameters = emptyMap()
+    )
+
+    private val checkFirewallHealthToolDeclaration = FunctionDeclaration(
+        name = "checkFirewallHealthAndTunnels",
+        description = "Queries a saved firewall appliance (Sophos XG/XGS, Fortinet FortiGate, Palo Alto PAN-OS, Cisco ASA/FTD, or pfSense/OPNsense) for CPU/RAM health, HA state, WAN SLA, and IPsec/XFRM tunnel status.",
+        parameters = mapOf(
+            "vendor" to Schema.string(description = "Firewall vendor (e.g., SOPHOS_XGS, FORTINET_FORTIGATE, PALO_ALTO_PANOS, CISCO_ASA_FTD, PFSENSE_OPNSENSE)"),
+            "host" to Schema.string(description = "Appliance IP or hostname")
+        )
+    )
+
+    private val analyzeIpsecDropLogToolDeclaration = FunctionDeclaration(
+        name = "analyzeIpsecTunnelDropLog",
+        description = "Analyzes raw IPsec / StrongSwan / XFRM / IKEv2 / FortiGate / ASA / Sophos tunnel drop logs for Phase 1/2 mismatches, Invalid SPI, DPD timeouts, or NAT-T issues.",
+        parameters = mapOf(
+            "rawLogText" to Schema.string(description = "Raw IKE/IPsec/XFRM diagnostic log excerpt"),
+            "localVendor" to Schema.string(description = "Local firewall/VPN vendor"),
+            "remoteVendor" to Schema.string(description = "Remote peer vendor")
+        )
+    )
+
+    private val simulateFirewallPolicyMatchToolDeclaration = FunctionDeclaration(
+        name = "simulateFirewallPolicyMatch",
+        description = "Simulates a firewall security policy & NAT match (PAN-OS security-policy-match, Cisco ASA packet-tracer, or FortiGate rule lookup) for a 5-tuple flow.",
+        parameters = mapOf(
+            "vendor" to Schema.string(description = "Firewall vendor (PALO_ALTO_PANOS, CISCO_ASA_FTD, FORTINET_FORTIGATE)"),
+            "host" to Schema.string(description = "Firewall management IP or hostname"),
+            "srcIp" to Schema.string(description = "Source IPv4 address"),
+            "dstIp" to Schema.string(description = "Destination IPv4 address"),
+            "dstPort" to Schema.integer(description = "Destination TCP/UDP port"),
+            "protocol" to Schema.string(description = "Protocol tcp or udp")
+        )
+    )
+
+    private val runRadiusAuthVsaToolDeclaration = FunctionDeclaration(
+        name = "runRadiusAuthAndVsaTest",
+        description = "Executes a live RADIUS RFC 2865 Access-Request (PAP/CHAP/MS-CHAPv2 with Message-Authenticator) using vaulted server secret and decodes returned VSAs & 802.1X VLAN tags.",
+        parameters = mapOf(
+            "serverIp" to Schema.string(description = "RADIUS server IPv4 or hostname"),
+            "port" to Schema.integer(description = "RADIUS UDP port (default 1812)"),
+            "authProtocol" to Schema.string(description = "PAP, CHAP, or MSCHAPV2"),
+            "username" to Schema.string(description = "Username to test")
+        )
+    )
+
+    val allToolDeclarations: List<FunctionDeclaration> = listOf(
+        pingToolDeclaration,
+        portScanToolDeclaration,
+        gatewayVsWanToolDeclaration,
+        wifiCongestionToolDeclaration,
+        querySnmpToolDeclaration,
+        inspectTopFlowTalkersToolDeclaration,
+        auditServerBmcRedfishToolDeclaration,
+        runNmapServiceFingerprintToolDeclaration,
+        executeNetworkOsShowCommandToolDeclaration,
+        testMqttOrCoapEndpointToolDeclaration,
+        vpnAndDnsLeakToolDeclaration,
+        probeHttpEndpointToolDeclaration,
+        dhcpOrTimeProbeToolDeclaration,
+        pathMtuToolDeclaration,
+        dnsAndAlpnBenchmarkToolDeclaration,
+        onvifAndEvilTwinToolDeclaration,
+        cellularTelemetryToolDeclaration,
+        trafficAndPcapSummaryToolDeclaration,
+        checkFirewallHealthToolDeclaration,
+        analyzeIpsecDropLogToolDeclaration,
+        simulateFirewallPolicyMatchToolDeclaration,
+        runRadiusAuthVsaToolDeclaration
+    )
+
+    val registeredToolNames: Set<String> = setOf(
+        "runLivePingTest",
+        "scanDeviceOpenPorts",
+        "measureGatewayVsWanLatency",
+        "getWifiChannelCongestionReport",
+        "querySnmpDeviceHealth",
+        "inspectTopFlowTalkers",
+        "auditServerBmcRedfish",
+        "runNmapServiceFingerprint",
+        "executeNetworkOsShowCommand",
+        "testMqttOrCoapEndpoint",
+        "checkVpnAndDnsLeakStatus",
+        "probeHttpOrSoapEndpoint",
+        "runDhcpOrTimeProbe",
+        "runPathMtuDiscovery",
+        "runDnsAndHttp3Benchmark",
+        "scanOnvifOrEvilTwin",
+        "inspectCellularSignal",
+        "getTrafficAndPcapSummary",
+        "checkFirewallHealthAndTunnels",
+        "analyzeIpsecTunnelDropLog",
+        "simulateFirewallPolicyMatch",
+        "runRadiusAuthAndVsaTest"
+    )
+
     private fun getChatModelWithTools(): GenerativeModel? {
         return runCatching {
             context?.let { ctx ->
@@ -262,25 +416,7 @@ class AiDiagnosticService(
             Firebase.ai(backend = GenerativeBackend.googleAI()).generativeModel(
                 modelName = "gemini-3.8-flash",
                 systemInstruction = content { text(systemInstructionText) },
-                tools = listOf(
-                    Tool.functionDeclarations(
-                        listOf(
-                            pingToolDeclaration,
-                            portScanToolDeclaration,
-                            gatewayVsWanToolDeclaration,
-                            wifiCongestionToolDeclaration,
-                            querySnmpToolDeclaration,
-                            inspectTopFlowTalkersToolDeclaration,
-                            auditServerBmcRedfishToolDeclaration,
-                            runNmapServiceFingerprintToolDeclaration,
-                            executeNetworkOsShowCommandToolDeclaration,
-                            testMqttOrCoapEndpointToolDeclaration,
-                            vpnAndDnsLeakToolDeclaration,
-                            probeHttpEndpointToolDeclaration,
-                            dhcpOrTimeProbeToolDeclaration
-                        )
-                    )
-                )
+                tools = listOf(Tool.functionDeclarations(allToolDeclarations))
             )
         }.onFailure { Log.w(TAG, "ChatModelWithTools initialization unavailable", it) }.getOrNull()
     }
@@ -419,6 +555,32 @@ class AiDiagnosticService(
         }
     }
 
+    suspend fun explainTechnicalOutput(
+        contextTitle: String,
+        rawTelemetry: String
+    ): String = withContext(Dispatchers.IO) {
+        try {
+            val model = getGeneralModel()
+                ?: return@withContext "AI explanation unavailable: Firebase AI initializing or offline."
+            val prompt = """
+                As a Principal Network Security & AAA Engineer, explain the following $contextTitle telemetry clearly and concisely (3-4 bullet points max):
+                - Highlight root causes (e.g., Phase 1/2 IKE mismatch, NAT-T UDP 4500 drop, Firewall policy shadow, Blast-RADIUS Message-Authenticator failure, MS-CHAPv2 rejection, or LDAP Invalid Credentials 49).
+                - Provide the exact corrective CLI or GUI configuration step.
+                
+                Raw Result:
+                ${rawTelemetry.take(2500)}
+            """.trimIndent()
+            val response = withTimeout(45_000L) {
+                model.generateContent(prompt)
+            }
+            response.text ?: "Explanation unavailable."
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            "AI explanation unavailable: ${e.message}"
+        }
+    }
+
     fun streamChatWithTools(
         userMessage: String,
         onToolExecuting: (toolName: String) -> Unit
@@ -488,7 +650,7 @@ class AiDiagnosticService(
         }
     }.flowOn(Dispatchers.IO)
 
-    private suspend fun executeNetworkTool(name: String, args: Map<String, String>): Map<String, Any> {
+    internal suspend fun executeNetworkTool(name: String, args: Map<String, String>): Map<String, Any> {
         return when (name) {
             "runLivePingTest" -> {
                 val host = args["targetHost"]?.takeIf { it.isNotBlank() }
@@ -723,6 +885,203 @@ class AiDiagnosticService(
                         "stratum" to ntp.stratum
                     )
                 }
+            }
+            "runPathMtuDiscovery" -> {
+                val host = args["targetHost"]?.takeIf { it.isNotBlank() } ?: "1.1.1.1"
+                val mtuRepo = mtuDiscoveryRepository ?: return mapOf("error" to "MtuDiscoveryRepository unavailable")
+                val res = mtuRepo.discoverPathMtu(host)
+                mapOf(
+                    "target" to res.targetHost,
+                    "resolved_ip" to res.resolvedIp,
+                    "path_mtu_bytes" to res.pathMtuBytes,
+                    "max_icmp_payload" to res.maxPayloadBytes,
+                    "overhead_bytes" to res.ipIcmpOverheadBytes,
+                    "error" to (res.errorMessage ?: "none")
+                )
+            }
+            "runDnsAndHttp3Benchmark" -> {
+                val domain = args["domain"]?.takeIf { it.isNotBlank() } ?: "cloudflare.com"
+                val adv = advancedProtocolRepository ?: return mapOf("error" to "AdvancedProtocolRepository unavailable")
+                val dnsList = adv.runDnsAndDnssecBenchmark(domain)
+                val he = adv.testHappyEyeballsAndAlpn(domain, 443)
+                mapOf(
+                    "domain" to domain,
+                    "fastest_dns" to (dnsList.firstOrNull { it.isSuccess }?.let { "${it.resolverName} (${it.avgRttMs}ms, AD=${it.dnssecAuthenticatedData})" } ?: "none"),
+                    "happy_eyeballs_winner" to he.winnerFamily,
+                    "alpn_protocol" to he.alpnProtocol,
+                    "supports_http3_quic" to he.supportsHttp3Quic
+                )
+            }
+            "scanOnvifOrEvilTwin" -> {
+                val audit = lanSecurityAuditRepository ?: return mapOf("error" to "LanSecurityAuditRepository unavailable")
+                val type = args["auditType"] ?: "EVIL_TWIN"
+                if (type.equals("ONVIF", true)) {
+                    val cams = audit.discoverOnvifCameras()
+                    mapOf("audit_type" to "ONVIF", "cameras_found" to cams.size, "ips" to cams.map { it.ip })
+                } else {
+                    val findings = audit.auditEvilTwinAndWifiSecurity().getOrDefault(emptyList())
+                    mapOf(
+                        "audit_type" to "EVIL_TWIN",
+                        "findings_count" to findings.size,
+                        "highlights" to findings.take(5).map { "${it.severity.label}: ${it.ssid} (${it.reason})" }
+                    )
+                }
+            }
+            "inspectCellularSignal" -> {
+                val cellRepo = cellularTelemetryRepository ?: return mapOf("error" to "CellularTelemetryRepository unavailable")
+                val st = cellRepo.inspectCellularTelemetry()
+                mapOf(
+                    "operator" to st.operatorName,
+                    "radio_type" to st.radioType.label,
+                    "band" to st.bandLabel,
+                    "rsrp_dbm" to (st.rsrpDbm ?: 0),
+                    "rsrq_db" to (st.rsrqDb ?: 0),
+                    "sinr_db" to (st.sinrDb ?: 0),
+                    "neighbors_count" to st.neighbors.size,
+                    "error" to (st.errorMessage ?: "none")
+                )
+            }
+            "getTrafficAndPcapSummary" -> {
+                val sample = batchAutomationRepository?.latestTrafficSample?.value
+                val pcap = pcapCaptureEngine?.stats?.value
+                mapOf(
+                    "rx_bps" to (sample?.totalRxBps ?: 0L),
+                    "tx_bps" to (sample?.totalTxBps ?: 0L),
+                    "pcap_capturing" to (pcap?.isCapturing ?: false),
+                    "pcap_packets" to (pcap?.packetCount ?: 0L),
+                    "pcap_bytes" to (pcap?.totalBytes ?: 0L)
+                )
+            }
+            "checkFirewallHealthAndTunnels" -> {
+                val host = args["host"].orEmpty().trim()
+                val vendorArg = args["vendor"].orEmpty().trim()
+                val fwRepo = firewallManagementRepository
+                    ?: return mapOf("error" to "FirewallManagementRepository unavailable")
+                val appliances = fwRepo.savedAppliancesFlow.first()
+                val matched = appliances.firstOrNull {
+                    (host.isBlank() || it.host.equals(host, ignoreCase = true) || it.name.contains(host, true)) &&
+                        (vendorArg.isBlank() || it.vendor.name.contains(vendorArg, true) || it.vendor.shortCode.contains(vendorArg, true))
+                } ?: appliances.firstOrNull { host.isNotBlank() && it.host.equals(host, ignoreCase = true) }
+
+                if (matched == null) {
+                    return mapOf(
+                        "status" to "No saved firewall appliance found matching '$host' ($vendorArg). Add the appliance in Firewall Hub first so credentials stay sealed in AndroidKeyStore."
+                    )
+                }
+                val snap = fwRepo.fetchApplianceDashboard(matched).getOrElse { err ->
+                    return mapOf("host" to matched.host, "vendor" to matched.vendor.shortCode, "error" to (err.localizedMessage ?: "Poll failed"))
+                }
+                mapOf(
+                    "appliance" to matched.name,
+                    "vendor" to matched.vendor.displayName,
+                    "host" to matched.host,
+                    "cpu_percent" to (snap.health?.cpuPercent ?: 0f),
+                    "memory_percent" to (snap.health?.memoryPercent ?: 0f),
+                    "active_sessions" to (snap.health?.activeSessions ?: 0L),
+                    "ha_state" to "${snap.health?.haRole ?: "--"} (${snap.health?.haState ?: "--"})",
+                    "tunnels_total" to snap.ipsecTunnels.size,
+                    "tunnels_up" to snap.ipsecTunnels.count { it.isUp },
+                    "wan_gateways" to snap.wanGateways.joinToString("; ") { "${it.name}:${it.status}(${it.latencyMs}ms)" }
+                )
+            }
+            "analyzeIpsecTunnelDropLog" -> {
+                val raw = args["rawLogText"].orEmpty()
+                val localVendor = args["localVendor"] ?: "LocalPeer"
+                val remoteVendor = args["remoteVendor"] ?: "RemotePeer"
+                val findings = mutableListOf<String>()
+                if (raw.contains("NO_PROPOSAL_CHOSEN", ignoreCase = true) || raw.contains("proposal mismatch", true)) {
+                    findings.add("Phase 1/2 Crypto Mismatch (NO_PROPOSAL_CHOSEN): Verify identical AES-GCM/SHA-256/DH-Group (e.g., DH14/19/20) between $localVendor and $remoteVendor.")
+                }
+                if (raw.contains("INVALID_SPI", ignoreCase = true) || raw.contains("no SA found", true)) {
+                    findings.add("Desynchronized SPI (INVALID_SPI): One peer flushed its Child SA while the other kept transmitting; bounce Phase-2 SA or enable DPD.")
+                }
+                if (raw.contains("DPD", ignoreCase = true) || raw.contains("retransmit", true) || raw.contains("timeout", true)) {
+                    findings.add("Dead Peer Detection / UDP 500 or 4500 Reachability Drop: Check upstream ISP firewalling UDP 500/4500 or asymmetrical NAT-T traversal.")
+                }
+                if (raw.contains("TS_UNACCEPTABLE", ignoreCase = true) || raw.contains("traffic selector", true)) {
+                    findings.add("Traffic Selector Mismatch (TS_UNACCEPTABLE): Verify local/remote proxy ID subnets match identically (or switch to route-based VTI 0.0.0.0/0).")
+                }
+                if (raw.contains("AUTH_FAILED", ignoreCase = true) || raw.contains("PSK", true)) {
+                    findings.add("Authentication Failure: Check Pre-Shared Key / X.509 IKE ID (@fqdn vs IPv4) on both $localVendor and $remoteVendor.")
+                }
+                if (findings.isEmpty()) {
+                    findings.add("No signature drop token matched directly; check IKEv2 port 500/4500 reachability and ESP Protocol 50 filtering.")
+                }
+                mapOf(
+                    "local_vendor" to localVendor,
+                    "remote_vendor" to remoteVendor,
+                    "detected_issues" to findings,
+                    "log_length_chars" to raw.length
+                )
+            }
+            "simulateFirewallPolicyMatch" -> {
+                val host = args["host"].orEmpty().trim()
+                val vendorArg = args["vendor"].orEmpty().trim()
+                val srcIp = args["srcIp"] ?: "10.0.0.10"
+                val dstIp = args["dstIp"] ?: "1.1.1.1"
+                val dstPort = args["dstPort"]?.toIntOrNull() ?: 443
+                val proto = args["protocol"]?.lowercase() ?: "tcp"
+                val fwRepo = firewallManagementRepository
+                    ?: return mapOf("error" to "FirewallManagementRepository unavailable")
+                val appliances = fwRepo.savedAppliancesFlow.first()
+                val matched = appliances.firstOrNull {
+                    (host.isBlank() || it.host.equals(host, ignoreCase = true)) &&
+                        (vendorArg.isBlank() || it.vendor.name.contains(vendorArg, true) || it.vendor.shortCode.contains(vendorArg, true))
+                } ?: return mapOf("status" to "No saved firewall appliance found matching '$host' ($vendorArg). Save appliance in Firewall Hub first.")
+
+                when (matched.vendor) {
+                    FirewallVendor.PALO_ALTO_PANOS -> {
+                        val protoNum = if (proto == "udp") 17 else 6
+                        val res = fwRepo.testPanOsSecurityAndNatMatch(matched, "trust", "untrust", srcIp, dstIp, dstPort, protoNum, "ssl")
+                            .getOrElse { return mapOf("error" to (it.localizedMessage ?: "PAN-OS query failed")) }
+                        mapOf("vendor" to "PAN-OS", "rule" to res.matchedRuleName, "action" to res.action, "nat" to res.natRuleMatched)
+                    }
+                    FirewallVendor.CISCO_ASA_FTD -> {
+                        val res = fwRepo.runCiscoPacketTracer(matched, "inside", proto, srcIp, 52000, dstIp, dstPort)
+                            .getOrElse { return mapOf("error" to (it.localizedMessage ?: "Cisco packet-tracer failed")) }
+                        mapOf("vendor" to "Cisco ASA", "verdict" to res.verdict, "drop_reason" to res.dropReason, "phases" to res.phases.size)
+                    }
+                    else -> {
+                        val snap = fwRepo.fetchApplianceDashboard(matched).getOrNull()
+                        mapOf("vendor" to matched.vendor.shortCode, "policy_count" to (snap?.policyHits?.size ?: 0), "note" to "Policy hit-table fetched for ${matched.host}")
+                    }
+                }
+            }
+            "runRadiusAuthAndVsaTest" -> {
+                val serverIp = args["serverIp"]?.takeIf { it.isNotBlank() }
+                    ?: return mapOf("error" to "serverIp is required")
+                val port = args["port"]?.toIntOrNull() ?: 1812
+                val proto = when (args["authProtocol"]?.uppercase()) {
+                    "CHAP" -> RadiusAuthProtocol.CHAP
+                    "MSCHAPV2", "MS-CHAPV2" -> RadiusAuthProtocol.MSCHAPV2
+                    else -> RadiusAuthProtocol.PAP
+                }
+                val username = args["username"]?.takeIf { it.isNotBlank() } ?: "testuser"
+                val radiusRepo = radiusAndAaaRepository
+                    ?: return mapOf("error" to "RadiusAndAaaRepository unavailable")
+                val secret = radiusRepo.findSavedSecretForHost(serverIp)
+                    ?: return mapOf("status" to "No saved RADIUS profile/secret found for $serverIp in AAA Workbench Vault. Save a RADIUS server profile first.")
+                val res = radiusRepo.sendAuthenticationTest(
+                    RadiusAuthRequestConfig(
+                        serverIp = serverIp,
+                        port = port,
+                        sharedSecret = secret,
+                        username = username,
+                        password = "",
+                        protocol = proto
+                    )
+                )
+                mapOf(
+                    "server_ip" to res.serverIp,
+                    "port" to res.port,
+                    "protocol" to res.protocolUsed,
+                    "response_code" to res.responsePacketCode.label,
+                    "rtt_ms" to res.rttMs,
+                    "message_auth_valid" to res.messageAuthenticatorValid,
+                    "vlan_8021x" to res.dot1xSummary.vlanId,
+                    "vsas_decoded" to res.decodedVsas.map { "${it.attributeName}=${it.decodedValue}" },
+                    "error" to (res.errorMessage ?: "none")
+                )
             }
             else -> mapOf("status" to "unknown tool")
         }

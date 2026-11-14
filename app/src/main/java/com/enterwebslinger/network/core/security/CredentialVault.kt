@@ -33,6 +33,7 @@ class CredentialVault(context: Context) {
         private const val TRANSFORMATION = "AES/GCM/NoPadding"
         private const val GCM_TAG_LENGTH = 128
         private const val IV_LENGTH = 12
+        const val KEY_GEMINI_FALLBACK_API_KEY = "gemini_fallback_api_key"
     }
 
     init {
@@ -126,6 +127,16 @@ class CredentialVault(context: Context) {
 
     fun hasSecret(key: String): Boolean {
         return prefs.contains(key)
+    }
+
+    fun saveGeminiFallbackApiKey(apiKey: String): Boolean = putSecret(KEY_GEMINI_FALLBACK_API_KEY, apiKey.trim())
+
+    fun getGeminiFallbackApiKey(): String? = getSecret(KEY_GEMINI_FALLBACK_API_KEY)?.takeIf { it.isNotBlank() }
+
+    fun hasGeminiFallbackApiKey(): Boolean = !getGeminiFallbackApiKey().isNullOrBlank()
+
+    fun clearGeminiFallbackApiKey() {
+        removeSecret(KEY_GEMINI_FALLBACK_API_KEY)
     }
 
     @Synchronized

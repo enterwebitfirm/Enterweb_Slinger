@@ -104,6 +104,23 @@ class AiAssistantViewModel @JvmOverloads constructor(
         }
     }
 
+    fun explainTechnicalResult(key: String, contextTitle: String, rawTelemetry: String) {
+        if (rawTelemetry.isBlank()) return
+        viewModelScope.launch {
+            _microDiagnosisLoading.value = _microDiagnosisLoading.value + key
+            try {
+                val explanation = aiDiagnosticService.explainTechnicalOutput(contextTitle, rawTelemetry)
+                _microDiagnosisMap.value = _microDiagnosisMap.value + (key to explanation)
+            } finally {
+                _microDiagnosisLoading.value = _microDiagnosisLoading.value - key
+            }
+        }
+    }
+
+    fun clearMicroDiagnosis(key: String) {
+        _microDiagnosisMap.value = _microDiagnosisMap.value - key
+    }
+
     fun sendChatMessage(userText: String) {
         val cleanText = userText.trim()
         if (cleanText.isBlank()) return

@@ -45,6 +45,8 @@ class OmniVpnService : VpnService() {
     companion object {
         const val ACTION_CONNECT = "com.enterwebslinger.network.vpn.CONNECT"
         const val ACTION_DISCONNECT = "com.enterwebslinger.network.vpn.DISCONNECT"
+        const val ACTION_START_PCAP = "com.enterwebslinger.network.vpn.START_PCAP"
+        const val ACTION_STOP_PCAP = "com.enterwebslinger.network.vpn.STOP_PCAP"
         const val NOTIFICATION_CHANNEL_ID = "enterweb_vpn_channel"
         const val NOTIFICATION_ID = 4040
 
@@ -72,6 +74,24 @@ class OmniVpnService : VpnService() {
             }
             context.startService(intent)
         }
+
+        fun startLocalPcapCapture(context: Context) {
+            val intent = Intent(context, OmniVpnService::class.java).apply {
+                action = ACTION_START_PCAP
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+        }
+
+        fun stopLocalPcapCapture(context: Context) {
+            val intent = Intent(context, OmniVpnService::class.java).apply {
+                action = ACTION_STOP_PCAP
+            }
+            context.startService(intent)
+        }
     }
 
     private var vpnInterface: ParcelFileDescriptor? = null
@@ -79,6 +99,10 @@ class OmniVpnService : VpnService() {
     private var protectedUdpSocket: DatagramSocket? = null
     private var protectedSslSocket: SSLSocket? = null
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    private val pcapEngine by lazy {
+        com.enterwebslinger.network.EnterwebSlingerApp.getContainer().pcapCaptureEngine
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -95,7 +119,20 @@ class OmniVpnService : VpnService() {
                     connectTunnel(profile)
                 }
             }
+            ACTION_START_PCAP -> {
+                startForeground(NOTIFICATION_ID, buildNotification("Local PCAP Packet Capture Active"))
+                startLocalPcapLoop()
+            }
+            ACTION_STOP_PCAP -> {
+                pcapEngine.stopCaptureSession()
+                if (_telemetry.value.status != VpnStatus.CONNECTED) {
+                    disconnectTunnel()
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf()
+                }
+            }
             ACTION_DISCONNECT -> {
+                pcapEngine.stopCaptureSession()
                 disconnectTunnel()
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
@@ -369,6 +406,9 @@ class OmniVpnService : VpnService() {
                             if (rxPacket.length > 0) {
                                 totalBytesIn.addAndGet(rxPacket.length.toLong())
                                 if (rxPacket.length > 20 && (rxBuffer[0].toInt() ushr 4) in listOf(4, 6)) {
+                                    if (pcapEngine.stats.value.isCapturing) {
+                                        pcapEngine.recordRawIpPacket(rxBuffer, rxPacket.length)
+                                    }
                                     runCatching { outStream.write(rxBuffer, 0, rxPacket.length) }
                                 }
                             }
@@ -382,11 +422,35 @@ class OmniVpnService : VpnService() {
             }
         } else null
 
+        val wgKeepaliveSec = if (activeProfile?.protocol == VpnProtocol.WIREGUARD) {
+            (activeProfile?.wireGuardConfig?.persistentKeepalive ?: 0).coerceIn(0, 120)
+        } else 0
+        val keepaliveJob = if (udpSocket != null && wgKeepaliveSec > 0) {
+            serviceScope.launch {
+                val keepalivePayload = ByteArray(32).apply { this[0] = 0x04 } // WireGuard Type 4 Transport Data empty keepalive
+                try {
+                    while (isActive && !udpSocket.isClosed) {
+                        delay(wgKeepaliveSec * 1000L)
+                        if (!udpSocket.isClosed) {
+                            runCatching {
+                                udpSocket.send(DatagramPacket(keepalivePayload, keepalivePayload.size))
+                            }
+                        }
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {}
+            }
+        } else null
+
         try {
             while (true) {
                 val length = inStream.read(txBuffer)
                 if (length > 0) {
                     totalBytesOut.addAndGet(length.toLong())
+                    if (pcapEngine.stats.value.isCapturing) {
+                        pcapEngine.recordRawIpPacket(txBuffer, length)
+                    }
                     if (udpSocket != null && !udpSocket.isClosed && length <= 1500) {
                         runCatching {
                             udpSocket.send(DatagramPacket(txBuffer, length))
@@ -402,9 +466,161 @@ class OmniVpnService : VpnService() {
         } finally {
             monitorJob.cancel()
             rxJob?.cancel()
+            keepaliveJob?.cancel()
             NetworkByteUtils.safeClose(inStream)
             NetworkByteUtils.safeClose(outStream)
         }
+    }
+
+    private fun startLocalPcapLoop() {
+        val sessionRes = pcapEngine.startCaptureSession()
+        if (sessionRes.isFailure) {
+            return
+        }
+        // If a VPN tunnel is already active, runTunnelDataPump automatically mirrors all packets to pcapEngine.
+        if (_telemetry.value.status == VpnStatus.CONNECTED && vpnInterface != null) {
+            return
+        }
+
+        tunnelJob?.cancel()
+        tunnelJob = serviceScope.launch {
+            var inStream: FileInputStream? = null
+            var outStream: FileOutputStream? = null
+            try {
+                val builder = Builder()
+                    .setSession("Enterweb PCAP Sniffer")
+                    .addAddress("10.254.254.2", 30)
+                    .addRoute("10.254.254.0", 30)
+                    .addDnsServer("10.254.254.1")
+                    .setMtu(1500)
+                runCatching { builder.addDisallowedApplication(packageName) }
+
+                val pfd = builder.establish() ?: run {
+                    pcapEngine.stopCaptureSession()
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf()
+                    return@launch
+                }
+                vpnInterface = pfd
+
+                val safeIn = FileInputStream(pfd.fileDescriptor)
+                val safeOut = FileOutputStream(pfd.fileDescriptor)
+                inStream = safeIn
+                outStream = safeOut
+
+                val buf = ByteArray(32768)
+                val upstreamDns = InetAddress.getByName("1.1.1.1")
+
+                while (isActive && pcapEngine.stats.value.isCapturing) {
+                    val len = safeIn.read(buf)
+                    if (len == -1) break
+                    if (len < 20) continue
+
+                    val version = (buf[0].toInt() ushr 4) and 0x0F
+                    pcapEngine.recordRawIpPacket(buf, len)
+
+                    if (version == 4) {
+                        val ihl = (buf[0].toInt() and 0x0F) * 4
+                        val proto = buf[9].toInt() and 0xFF
+                        if (proto == 17 && len >= ihl + 8) {
+                            val srcPort = ((buf[ihl].toInt() and 0xFF) shl 8) or (buf[ihl + 1].toInt() and 0xFF)
+                            val dstPort = ((buf[ihl + 2].toInt() and 0xFF) shl 8) or (buf[ihl + 3].toInt() and 0xFF)
+                            if (dstPort == 53) {
+                                val dnsPayloadOffset = ihl + 8
+                                val dnsPayloadLen = len - dnsPayloadOffset
+                                if (dnsPayloadLen > 0) {
+                                    val srcIpBytes = buf.copyOfRange(12, 16)
+                                    val dstIpBytes = buf.copyOfRange(16, 20)
+                                    val queryPayload = buf.copyOfRange(dnsPayloadOffset, len)
+                                    serviceScope.launch {
+                                        runCatching {
+                                            DatagramSocket().use { qSock ->
+                                                qSock.soTimeout = 2500
+                                                if (!protect(qSock)) return@use
+                                                qSock.send(DatagramPacket(queryPayload, queryPayload.size, upstreamDns, 53))
+                                                val respBuf = ByteArray(2048)
+                                                val respPkt = DatagramPacket(respBuf, respBuf.size)
+                                                qSock.receive(respPkt)
+                                                val ipUdpReply = buildIpv4UdpPacket(
+                                                    srcIp = dstIpBytes,
+                                                    dstIp = srcIpBytes,
+                                                    srcPort = 53,
+                                                    dstPort = srcPort,
+                                                    payload = respBuf.copyOf(respPkt.length)
+                                                )
+                                                pcapEngine.recordRawIpPacket(ipUdpReply, ipUdpReply.size)
+                                                synchronized(safeOut) {
+                                                    safeOut.write(ipUdpReply)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+            } finally {
+                pcapEngine.stopCaptureSession()
+                NetworkByteUtils.safeClose(inStream)
+                NetworkByteUtils.safeClose(outStream)
+                NetworkByteUtils.safeClose(vpnInterface)
+                vpnInterface = null
+            }
+        }
+    }
+
+    private fun buildIpv4UdpPacket(
+        srcIp: ByteArray,
+        dstIp: ByteArray,
+        srcPort: Int,
+        dstPort: Int,
+        payload: ByteArray
+    ): ByteArray {
+        val totalLen = 20 + 8 + payload.size
+        val pkt = ByteArray(totalLen)
+        pkt[0] = 0x45.toByte() // Version 4, IHL 5
+        pkt[2] = ((totalLen ushr 8) and 0xFF).toByte()
+        pkt[3] = (totalLen and 0xFF).toByte()
+        pkt[8] = 64.toByte() // TTL
+        pkt[9] = 17.toByte() // UDP
+        System.arraycopy(srcIp, 0, pkt, 12, 4)
+        System.arraycopy(dstIp, 0, pkt, 16, 4)
+
+        val ipCsum = computeChecksum(pkt, 0, 20)
+        pkt[10] = ((ipCsum ushr 8) and 0xFF).toByte()
+        pkt[11] = (ipCsum and 0xFF).toByte()
+
+        val udpLen = 8 + payload.size
+        pkt[20] = ((srcPort ushr 8) and 0xFF).toByte()
+        pkt[21] = (srcPort and 0xFF).toByte()
+        pkt[22] = ((dstPort ushr 8) and 0xFF).toByte()
+        pkt[23] = (dstPort and 0xFF).toByte()
+        pkt[24] = ((udpLen ushr 8) and 0xFF).toByte()
+        pkt[25] = (udpLen and 0xFF).toByte()
+        System.arraycopy(payload, 0, pkt, 28, payload.size)
+        // IPv4 UDP checksum 0 is valid per RFC 768 when optional
+        return pkt
+    }
+
+    private fun computeChecksum(buf: ByteArray, offset: Int, length: Int): Int {
+        var sum = 0
+        var i = offset
+        while (i + 1 < offset + length) {
+            val word = ((buf[i].toInt() and 0xFF) shl 8) or (buf[i + 1].toInt() and 0xFF)
+            sum += word
+            i += 2
+        }
+        if (i < offset + length) {
+            sum += (buf[i].toInt() and 0xFF) shl 8
+        }
+        while ((sum ushr 16) != 0) {
+            sum = (sum and 0xFFFF) + (sum ushr 16)
+        }
+        return (sum.inv()) and 0xFFFF
     }
 
     private fun parseCidr(rawCidr: String): Pair<String, Int>? {

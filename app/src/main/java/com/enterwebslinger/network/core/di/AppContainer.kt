@@ -7,26 +7,39 @@ import androidx.lifecycle.ViewModelProvider
 import com.enterwebslinger.network.core.security.CredentialVault
 import com.enterwebslinger.network.data.local.datastore.UserPreferencesDataStore
 import com.enterwebslinger.network.data.local.db.OmniNetDatabase
+import com.enterwebslinger.network.data.local.db.dao.AaaServerProfileDao
 import com.enterwebslinger.network.data.local.db.dao.DeviceDao
 import com.enterwebslinger.network.data.local.db.dao.EndpointProfileDao
 import com.enterwebslinger.network.data.local.db.dao.HostWatchDao
 import com.enterwebslinger.network.data.local.db.dao.ScanHistoryDao
 import com.enterwebslinger.network.data.local.db.dao.SyslogDao
+import com.enterwebslinger.network.data.protocol.PcapCaptureEngine
+import com.enterwebslinger.network.data.repository.AaaDiagnosticsRepository
+import com.enterwebslinger.network.data.repository.AdvancedProtocolRepository
+import com.enterwebslinger.network.data.repository.BatchAutomationRepository
+import com.enterwebslinger.network.data.repository.CellularTelemetryRepository
 import com.enterwebslinger.network.data.repository.CiscoCollaborationRepository
 import com.enterwebslinger.network.data.repository.CoreProtocolsRepository
 import com.enterwebslinger.network.data.repository.DiagnosticsRepository
 import com.enterwebslinger.network.data.repository.EngineeringUtilitiesRepository
+import com.enterwebslinger.network.data.repository.EnterpriseIdentityRepository
+import com.enterwebslinger.network.data.repository.EnterpriseVpnRepository
 import com.enterwebslinger.network.data.repository.FileTransferRepository
+import com.enterwebslinger.network.data.repository.FirewallManagementRepository
 import com.enterwebslinger.network.data.repository.FlowCollectorRepository
 import com.enterwebslinger.network.data.repository.GnmiRepository
 import com.enterwebslinger.network.data.repository.IotProtocolsRepository
 import com.enterwebslinger.network.data.repository.LanScannerRepository
+import com.enterwebslinger.network.data.repository.LanSecurityAuditRepository
 import com.enterwebslinger.network.data.repository.LibreNmsRepository
+import com.enterwebslinger.network.data.repository.MtuDiscoveryRepository
 import com.enterwebslinger.network.data.repository.NetworkInfoRepository
 import com.enterwebslinger.network.data.repository.NetworkTelemetryAggregator
 import com.enterwebslinger.network.data.repository.NetworkTopologyRepository
 import com.enterwebslinger.network.data.repository.NmapFingerprintEngine
 import com.enterwebslinger.network.data.repository.OobHardwareRepository
+import com.enterwebslinger.network.data.repository.RadiusAndAaaRepository
+import com.enterwebslinger.network.data.repository.RfAndBleScannerRepository
 import com.enterwebslinger.network.data.repository.SecurityRepository
 import com.enterwebslinger.network.data.repository.SnmpRepository
 import com.enterwebslinger.network.data.repository.SyslogRepository
@@ -36,14 +49,18 @@ import com.enterwebslinger.network.data.repository.VpnRepository
 import com.enterwebslinger.network.data.repository.WebServicesRepository
 import com.enterwebslinger.network.data.repository.WifiSpeedRepository
 import com.enterwebslinger.network.service.AiDiagnosticService
+import com.enterwebslinger.network.ui.screens.aaa.AaaIdentityViewModel
 import com.enterwebslinger.network.ui.screens.ai.AiAssistantViewModel
 import com.enterwebslinger.network.ui.screens.dashboard.DashboardViewModel
 import com.enterwebslinger.network.ui.screens.datacenter.DataCenterViewModel
 import com.enterwebslinger.network.ui.screens.diagnostics.DiagnosticsViewModel
 import com.enterwebslinger.network.ui.screens.engineering.EngineeringViewModel
 import com.enterwebslinger.network.ui.screens.enterprise.EnterpriseViewModel
+import com.enterwebslinger.network.ui.screens.firewall.FirewallViewModel
 import com.enterwebslinger.network.ui.screens.iot.IotApiWorkbenchViewModel
 import com.enterwebslinger.network.ui.screens.lanscanner.LanScannerViewModel
+import com.enterwebslinger.network.ui.screens.protoolkit.ProToolkitViewModel
+import com.enterwebslinger.network.ui.screens.rffield.RfFieldViewModel
 import com.enterwebslinger.network.ui.screens.security.SecurityViewModel
 import com.enterwebslinger.network.ui.screens.vpn.VpnViewModel
 import com.enterwebslinger.network.ui.screens.wifi.WifiSpeedViewModel
@@ -84,6 +101,10 @@ class AppContainer(val context: Context) {
 
     val endpointProfileDao: EndpointProfileDao by lazy {
         omniNetDatabase.endpointProfileDao()
+    }
+
+    val aaaServerProfileDao: AaaServerProfileDao by lazy {
+        omniNetDatabase.aaaServerProfileDao()
     }
 
     val networkTopologyRepository: NetworkTopologyRepository by lazy {
@@ -167,6 +188,14 @@ class AppContainer(val context: Context) {
         VpnRepository(context)
     }
 
+    val enterpriseVpnRepository: EnterpriseVpnRepository by lazy {
+        EnterpriseVpnRepository(context, vpnRepository)
+    }
+
+    val firewallManagementRepository: FirewallManagementRepository by lazy {
+        FirewallManagementRepository(context, endpointProfileDao, credentialVault)
+    }
+
     val iotProtocolsRepository: IotProtocolsRepository by lazy {
         IotProtocolsRepository(applicationScope)
     }
@@ -177,6 +206,50 @@ class AppContainer(val context: Context) {
 
     val engineeringUtilitiesRepository: EngineeringUtilitiesRepository by lazy {
         EngineeringUtilitiesRepository(context)
+    }
+
+    val mtuDiscoveryRepository: MtuDiscoveryRepository by lazy {
+        MtuDiscoveryRepository()
+    }
+
+    val rfAndBleScannerRepository: RfAndBleScannerRepository by lazy {
+        RfAndBleScannerRepository(context)
+    }
+
+    val cellularTelemetryRepository: CellularTelemetryRepository by lazy {
+        CellularTelemetryRepository(context)
+    }
+
+    val lanSecurityAuditRepository: LanSecurityAuditRepository by lazy {
+        LanSecurityAuditRepository(context, userPreferencesDataStore, networkInfoRepository)
+    }
+
+    val pcapCaptureEngine: PcapCaptureEngine by lazy {
+        PcapCaptureEngine(context)
+    }
+
+    val aaaDiagnosticsRepository: AaaDiagnosticsRepository by lazy {
+        AaaDiagnosticsRepository()
+    }
+
+    val radiusAndAaaRepository: RadiusAndAaaRepository by lazy {
+        RadiusAndAaaRepository(
+            scope = applicationScope,
+            aaaProfileDao = aaaServerProfileDao,
+            credentialVault = credentialVault
+        )
+    }
+
+    val enterpriseIdentityRepository: EnterpriseIdentityRepository by lazy {
+        EnterpriseIdentityRepository()
+    }
+
+    val advancedProtocolRepository: AdvancedProtocolRepository by lazy {
+        AdvancedProtocolRepository(networkInfoRepository)
+    }
+
+    val batchAutomationRepository: BatchAutomationRepository by lazy {
+        BatchAutomationRepository(applicationScope, endpointProfileDao, credentialVault)
     }
 
     val telemetryAggregator: NetworkTelemetryAggregator by lazy {
@@ -210,7 +283,18 @@ class AppContainer(val context: Context) {
             iotProtocolsRepository = iotProtocolsRepository,
             vpnRepository = vpnRepository,
             webServicesRepository = webServicesRepository,
-            coreProtocolsRepository = coreProtocolsRepository
+            coreProtocolsRepository = coreProtocolsRepository,
+            mtuDiscoveryRepository = mtuDiscoveryRepository,
+            advancedProtocolRepository = advancedProtocolRepository,
+            lanSecurityAuditRepository = lanSecurityAuditRepository,
+            cellularTelemetryRepository = cellularTelemetryRepository,
+            aaaDiagnosticsRepository = aaaDiagnosticsRepository,
+            pcapCaptureEngine = pcapCaptureEngine,
+            batchAutomationRepository = batchAutomationRepository,
+            firewallManagementRepository = firewallManagementRepository,
+            enterpriseVpnRepository = enterpriseVpnRepository,
+            radiusAndAaaRepository = radiusAndAaaRepository,
+            enterpriseIdentityRepository = enterpriseIdentityRepository
         )
     }
 
@@ -258,7 +342,10 @@ class AppContainer(val context: Context) {
                     ) as T
                 }
                 modelClass.isAssignableFrom(VpnViewModel::class.java) -> {
-                    VpnViewModel(vpnRepository) as T
+                    VpnViewModel(vpnRepository, pcapCaptureEngine, enterpriseVpnRepository) as T
+                }
+                modelClass.isAssignableFrom(FirewallViewModel::class.java) -> {
+                    FirewallViewModel(firewallManagementRepository) as T
                 }
                 modelClass.isAssignableFrom(IotApiWorkbenchViewModel::class.java) -> {
                     IotApiWorkbenchViewModel(
@@ -268,6 +355,30 @@ class AppContainer(val context: Context) {
                 }
                 modelClass.isAssignableFrom(EngineeringViewModel::class.java) -> {
                     EngineeringViewModel(engineeringUtilitiesRepository) as T
+                }
+                modelClass.isAssignableFrom(RfFieldViewModel::class.java) -> {
+                    RfFieldViewModel(
+                        rfAndBleRepository = rfAndBleScannerRepository,
+                        cellularRepository = cellularTelemetryRepository,
+                        lanSecurityAuditRepository = lanSecurityAuditRepository,
+                        networkInfoRepository = networkInfoRepository,
+                        lanScannerRepository = lanScannerRepository
+                    ) as T
+                }
+                modelClass.isAssignableFrom(ProToolkitViewModel::class.java) -> {
+                    ProToolkitViewModel(
+                        mtuRepository = mtuDiscoveryRepository,
+                        aaaRepository = aaaDiagnosticsRepository,
+                        advancedProtocolRepository = advancedProtocolRepository,
+                        batchAutomationRepository = batchAutomationRepository,
+                        userPreferencesDataStore = userPreferencesDataStore
+                    ) as T
+                }
+                modelClass.isAssignableFrom(AaaIdentityViewModel::class.java) -> {
+                    AaaIdentityViewModel(
+                        radiusRepo = radiusAndAaaRepository,
+                        identityRepo = enterpriseIdentityRepository
+                    ) as T
                 }
                 else -> throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")
             }

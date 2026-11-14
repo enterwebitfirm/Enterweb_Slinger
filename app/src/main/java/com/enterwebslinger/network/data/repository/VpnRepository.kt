@@ -7,6 +7,7 @@ import android.net.Ikev2VpnProfile
 import android.net.VpnManager
 import android.os.Build
 import com.enterwebslinger.network.core.util.NetworkByteUtils
+import com.enterwebslinger.network.data.protocol.IkePacketCodec
 import com.enterwebslinger.network.domain.model.DnsLeakResult
 import com.enterwebslinger.network.domain.model.Ikev2Config
 import com.enterwebslinger.network.domain.model.OpenVpnConfig
@@ -23,12 +24,19 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
 import java.io.BufferedReader
+import java.io.ByteArrayInputStream
 import java.io.InputStreamReader
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.SocketTimeoutException
+import java.security.KeyFactory
+import java.security.PrivateKey
+import java.security.cert.CertificateFactory
+import java.security.cert.X509Certificate
+import java.security.spec.PKCS8EncodedKeySpec
+import java.util.Base64
 import java.util.UUID
 import javax.net.ssl.SSLSocket
 import javax.net.ssl.SSLSocketFactory
@@ -52,7 +60,28 @@ class VpnRepository(private val context: Context? = null) {
     }
 
     fun addProfile(profile: VpnProfile) {
-        _profiles.update { it + profile }
+        _profiles.update { list ->
+            val filtered = list.filterNot { it.id == profile.id }
+            listOf(profile) + filtered
+        }
+    }
+
+    fun updateProfile(updated: VpnProfile) {
+        _profiles.update { list ->
+            if (list.any { it.id == updated.id }) {
+                list.map { if (it.id == updated.id) updated else it }
+            } else {
+                list + updated
+            }
+        }
+    }
+
+    fun updateProfileExcludedApps(profileId: String, excludedPackages: List<String>) {
+        _profiles.update { list ->
+            list.map { p ->
+                if (p.id == profileId) p.copy(splitTunnelExcludedApps = excludedPackages.distinct().sorted()) else p
+            }
+        }
     }
 
     fun removeProfile(profileId: String) {
@@ -65,10 +94,19 @@ class VpnRepository(private val context: Context? = null) {
         remoteIdentifier: String,
         preSharedKey: String,
         username: String = "",
-        password: String = ""
+        password: String = "",
+        authModeOverride: String? = null,
+        userCertPem: String = "",
+        userKeyPem: String = "",
+        caCertPem: String = "",
+        certSubjectSummary: String = ""
     ): VpnProfile {
         val cleanHost = serverAddress.trim()
-        val authMode = if (username.isNotBlank()) "EAP" else "PSK"
+        val authMode = authModeOverride ?: when {
+            userCertPem.isNotBlank() && userKeyPem.isNotBlank() -> "RSA"
+            username.isNotBlank() -> "EAP"
+            else -> "PSK"
+        }
         val profile = VpnProfile(
             id = UUID.randomUUID().toString(),
             name = name.ifBlank { "IKEv2 ($cleanHost)" },
@@ -83,7 +121,11 @@ class VpnRepository(private val context: Context? = null) {
                 authType = authMode,
                 preSharedKey = preSharedKey,
                 username = username.trim(),
-                password = password
+                password = password,
+                userCertPem = userCertPem,
+                userKeyPem = userKeyPem,
+                caCertPem = caCertPem,
+                certSubjectSummary = certSubjectSummary
             )
         )
         _profiles.update { it + profile }
@@ -110,18 +152,56 @@ class VpnRepository(private val context: Context? = null) {
                 ?: throw IllegalStateException("System VpnManager unavailable on this device")
             val remoteId = cfg.remoteIdentifier.ifBlank { cfg.serverAddress }
             val builder = Ikev2VpnProfile.Builder(cfg.serverAddress, remoteId)
-            if (cfg.authType.equals("EAP", ignoreCase = true) || cfg.username.isNotBlank()) {
-                builder.setAuthUsernamePassword(cfg.username, cfg.password, null)
-            } else {
-                if (cfg.preSharedKey.isBlank()) {
-                    throw IllegalArgumentException("IKEv2 Pre-Shared Key (PSK) is required")
+            when {
+                cfg.authType.equals("RSA", ignoreCase = true) -> {
+                    val userCert = parseX509FromPem(cfg.userCertPem)
+                        ?: throw IllegalArgumentException("Valid X.509 User Certificate PEM required for RSA mode")
+                    val privKey = parsePrivateKeyFromPem(cfg.userKeyPem)
+                        ?: throw IllegalArgumentException("Valid PKCS#8 Private Key PEM required for RSA mode")
+                    val caCert = cfg.caCertPem.takeIf { it.isNotBlank() }?.let { parseX509FromPem(it) }
+                    builder.setAuthDigitalSignature(userCert, privKey, caCert)
                 }
-                builder.setAuthPsk(cfg.preSharedKey.toByteArray(Charsets.UTF_8))
+                cfg.authType.equals("EAP", ignoreCase = true) || cfg.username.isNotBlank() -> {
+                    val caCert = cfg.caCertPem.takeIf { it.isNotBlank() }?.let { parseX509FromPem(it) }
+                    builder.setAuthUsernamePassword(cfg.username, cfg.password, caCert)
+                }
+                else -> {
+                    if (cfg.preSharedKey.isBlank()) {
+                        throw IllegalArgumentException("IKEv2 Pre-Shared Key (PSK) is required")
+                    }
+                    builder.setAuthPsk(cfg.preSharedKey.toByteArray(Charsets.UTF_8))
+                }
             }
             builder.setBypassable(true)
             builder.setMetered(false)
             vpnManager.provisionVpnProfile(builder.build())
         }
+    }
+
+    private fun parseX509FromPem(pem: String): X509Certificate? {
+        val cleaned = pem.trim()
+        if (cleaned.isBlank()) return null
+        return runCatching {
+            val cf = CertificateFactory.getInstance("X.509")
+            cf.generateCertificate(ByteArrayInputStream(cleaned.toByteArray(Charsets.UTF_8))) as? X509Certificate
+        }.getOrNull()
+    }
+
+    private fun parsePrivateKeyFromPem(pem: String): PrivateKey? {
+        val b64 = pem
+            .replace("-----BEGIN PRIVATE KEY-----", "")
+            .replace("-----END PRIVATE KEY-----", "")
+            .replace("-----BEGIN RSA PRIVATE KEY-----", "")
+            .replace("-----END RSA PRIVATE KEY-----", "")
+            .replace("\\s".toRegex(), "")
+        if (b64.isBlank()) return null
+        val der = runCatching { Base64.getDecoder().decode(b64) }.getOrNull() ?: return null
+        val spec = PKCS8EncodedKeySpec(der)
+        for (alg in listOf("RSA", "EC")) {
+            val key = runCatching { KeyFactory.getInstance(alg).generatePrivate(spec) }.getOrNull()
+            if (key != null) return key
+        }
+        return null
     }
 
     fun startIkev2PlatformProfile(): Result<Unit> {
@@ -195,9 +275,19 @@ class VpnRepository(private val context: Context? = null) {
 
         val (host, port) = parseEndpointHostPort(endpoint, 51820)
 
+        val derivedPub = runCatching {
+            val privBytes = com.enterwebslinger.network.data.protocol.WireGuardCrypto.decodeBase64Key(privKey)
+            if (privBytes != null) {
+                Base64.getEncoder().encodeToString(
+                    com.enterwebslinger.network.data.protocol.WireGuardCrypto.publicKeyFromPrivate(privBytes)
+                )
+            } else ""
+        }.getOrDefault("")
+
         val config = WireGuardConfig(
             privateKey = privKey,
             publicKey = pubKey,
+            derivedLocalPublicKey = derivedPub,
             presharedKey = presharedKey,
             interfaceAddresses = addresses,
             dnsServers = dnsServers,
@@ -245,6 +335,7 @@ class VpnRepository(private val context: Context? = null) {
         var port = 1194
         var proto = "udp"
         var cipher = "AES-256-GCM"
+        var authDigest = "SHA256"
         var localAddress = ""
         var netmask = "255.255.255.0"
         var mtu = 1500
@@ -268,6 +359,9 @@ class VpnRepository(private val context: Context? = null) {
                     }
                     "cipher", "data-ciphers" -> {
                         if (tokens.size >= 2) cipher = tokens[1]
+                    }
+                    "auth" -> {
+                        if (tokens.size >= 2) authDigest = tokens[1].uppercase()
                     }
                     "ifconfig" -> {
                         if (tokens.size >= 2) localAddress = tokens[1]
@@ -296,6 +390,7 @@ class VpnRepository(private val context: Context? = null) {
         val clientCert = ovpnContent.substringAfter("<cert>", "").substringBefore("</cert>", "").trim()
         val clientKey = ovpnContent.substringAfter("<key>", "").substringBefore("</key>", "").trim()
         val tlsAuth = ovpnContent.substringAfter("<tls-auth>", "").substringBefore("</tls-auth>", "").trim()
+        val tlsCrypt = ovpnContent.substringAfter("<tls-crypt>", "").substringBefore("</tls-crypt>", "").trim()
 
         val profile = VpnProfile(
             id = UUID.randomUUID().toString(),
@@ -311,7 +406,9 @@ class VpnRepository(private val context: Context? = null) {
                 clientCert = clientCert,
                 clientKey = clientKey,
                 tlsAuthKey = tlsAuth,
+                tlsCryptKey = tlsCrypt,
                 cipher = cipher,
+                authDigest = authDigest,
                 localAddress = localAddress,
                 netmask = netmask,
                 dnsServers = dnsServers,
@@ -384,36 +481,35 @@ class VpnRepository(private val context: Context? = null) {
         if (host.isBlank()) {
             return@withContext Result.failure(IllegalArgumentException("Target host is required"))
         }
+        val cleanHost = host.trim()
         var socket: DatagramSocket? = null
+        val t0 = System.currentTimeMillis()
         try {
-            socket = DatagramSocket().apply { soTimeout = 2500 }
+            socket = DatagramSocket().apply { soTimeout = 2800 }
+            val iSpi = ByteArray(8).apply { java.security.SecureRandom().nextBytes(this) }
+            val useNatT = port == 4500
+            val ikeProbe = IkePacketCodec.buildIkev2SaInitProbe(useNatT4500 = useNatT, initiatorSpi = iSpi)
 
-            val ikeProbe = byteArrayOf(
-                0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, // Initiator SPI
-                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Responder SPI
-                0x00, // Next Payload: No Next Payload
-                0x20, // Major/Minor: IKEv2 (2.0)
-                0x22, // Exchange: IKE_SA_INIT (34)
-                0x08, // Flags: Initiator
-                0x00, 0x00, 0x00, 0x00, // Message ID: 0
-                0x00, 0x00, 0x00, 0x1C  // Length: 28 bytes
-            )
-
-            val packet = DatagramPacket(ikeProbe, ikeProbe.size, InetAddress.getByName(host.trim()), port)
+            val packet = DatagramPacket(ikeProbe, ikeProbe.size, InetAddress.getByName(cleanHost), port)
             socket.send(packet)
 
-            val recvBuf = ByteArray(1500)
+            val recvBuf = ByteArray(2048)
             val recvPacket = DatagramPacket(recvBuf, recvBuf.size)
             try {
                 socket.receive(recvPacket)
-                val len = recvPacket.length
-                val respSpi = if (len >= 16) {
-                    recvPacket.data.sliceArray(8..15).joinToString("") { String.format("%02x", it) }
-                } else "n/a"
-                val exchange = if (len >= 19) recvPacket.data[18].toInt() and 0xFF else -1
-                Result.success("IKEv2 responder replied ($len bytes, exchange=$exchange, rSPI=$respSpi) from $host:$port")
+                val rtt = (System.currentTimeMillis() - t0).coerceAtLeast(1L)
+                val parsed = IkePacketCodec.parseIkev2Response(
+                    raw = recvPacket.data,
+                    length = recvPacket.length,
+                    host = cleanHost,
+                    port = port,
+                    useNatT4500 = useNatT,
+                    expectedISpiHex = NetworkByteUtils.bytesToHex(iSpi, ""),
+                    rttMs = rtt
+                )
+                Result.success(parsed.diagnosisSummary)
             } catch (_: SocketTimeoutException) {
-                Result.success("IKEv2 SA_INIT probe sent to $host:$port (no UDP reply within 2.5s)")
+                Result.success("IKEv2 SA_INIT probe sent to $cleanHost:$port (no UDP reply within 2.8s)")
             }
         } catch (e: CancellationException) {
             throw e
