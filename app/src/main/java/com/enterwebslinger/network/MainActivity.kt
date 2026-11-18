@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -43,15 +44,17 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -62,6 +65,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -74,8 +78,8 @@ import androidx.navigation.compose.rememberNavController
 import com.enterwebslinger.network.core.util.configureAppCheck
 import com.enterwebslinger.network.ui.components.AiChatModal
 import com.enterwebslinger.network.ui.components.CommandPaletteModal
+import com.enterwebslinger.network.ui.navigation.AppBottomNavigationBar
 import com.enterwebslinger.network.ui.navigation.AppNavHost
-import com.enterwebslinger.network.ui.navigation.BottomNavDestinations
 import com.enterwebslinger.network.ui.navigation.Screen
 import com.enterwebslinger.network.ui.navigation.navigateSingleTopTo
 import com.enterwebslinger.network.ui.screens.aaa.AaaIdentityViewModel
@@ -97,13 +101,13 @@ import com.enterwebslinger.network.ui.theme.CardBackground
 import com.enterwebslinger.network.ui.theme.CyberCyan
 import com.enterwebslinger.network.ui.theme.EnterwebSlingerTheme
 import com.enterwebslinger.network.ui.theme.StatusCrimson
-import com.enterwebslinger.network.ui.theme.TextMuted
 import com.enterwebslinger.network.ui.theme.TextSecondary
 import java.io.PrintWriter
 import java.io.StringWriter
 
 class MainActivity : ComponentActivity() {
 
+    @OptIn(ExperimentalMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -181,75 +185,58 @@ class MainActivity : ComponentActivity() {
                     var showAiChatModal by rememberSaveable { mutableStateOf(false) }
                     var showCommandPalette by rememberSaveable { mutableStateOf(false) }
 
+                    val density = LocalDensity.current
+                    val isImeVisible = WindowInsets.ime.getBottom(density) > 0
+                    val isTerminalActive = currentRoute == Screen.EnterpriseNoc.route // Or hide when terminal sub-tab active
+
                     Scaffold(
                         modifier = Modifier
                             .fillMaxSize()
                             .windowInsetsPadding(WindowInsets.safeDrawing),
+                        topBar = {
+                            TopAppBar(
+                                title = {
+                                    Text(
+                                        text = "Enterweb Slinger",
+                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = CyberCyan
+                                    )
+                                },
+                                actions = {
+                                    IconButton(
+                                        onClick = { showCommandPalette = true },
+                                        modifier = Modifier.testTag("global_command_palette_action")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Search,
+                                            contentDescription = "Command Palette (All Tools)",
+                                            tint = CyberCyan
+                                        )
+                                    }
+                                },
+                                colors = TopAppBarDefaults.topAppBarColors(containerColor = CardBackground)
+                            )
+                        },
                         floatingActionButton = {
-                            Column(
-                                verticalArrangement = Arrangement.spacedBy(10.dp),
-                                horizontalAlignment = Alignment.End
-                            ) {
-                                FloatingActionButton(
-                                    onClick = { showCommandPalette = true },
-                                    containerColor = CardBackground,
-                                    contentColor = CyberCyan,
-                                    modifier = Modifier.testTag("global_command_palette_fab")
-                                ) {
-                                    Icon(imageVector = Icons.Default.Search, contentDescription = "Command Palette (All Tools)")
-                                }
-
+                            if (!isImeVisible && !isTerminalActive) {
                                 FloatingActionButton(
                                     onClick = { showAiChatModal = true },
                                     containerColor = CyberCyan,
                                     contentColor = Color(0xFF00363D),
-                                    modifier = Modifier.testTag("global_ai_chat_fab")
+                                    modifier = Modifier
+                                        .testTag("global_ai_chat_fab")
+                                        .padding(bottom = if (isImeVisible) 0.dp else 56.dp)
                                 ) {
                                     Icon(imageVector = Icons.Default.AutoAwesome, contentDescription = "AI Diagnostics Assistant")
                                 }
                             }
                         },
                         bottomBar = {
-                            Surface(
-                                modifier = Modifier
-                                    .testTag("bottom_nav_bar")
-                                    .windowInsetsPadding(WindowInsets.navigationBars),
-                                color = CardBackground,
-                                tonalElevation = 8.dp
-                            ) {
-                                val selectedIndex = BottomNavDestinations.indexOfFirst { it.route == currentRoute }.coerceAtLeast(0)
-                                ScrollableTabRow(
-                                    selectedTabIndex = selectedIndex,
-                                    edgePadding = 8.dp,
-                                    containerColor = CardBackground,
-                                    contentColor = CyberCyan,
-                                    divider = {}
-                                ) {
-                                    BottomNavDestinations.forEach { screen ->
-                                        val selected = currentRoute == screen.route
-                                        Tab(
-                                            selected = selected,
-                                            onClick = { navController.navigateSingleTopTo(screen.route) },
-                                            text = {
-                                                Text(
-                                                    text = screen.title,
-                                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                                                    color = if (selected) CyberCyan else TextSecondary,
-                                                    maxLines = 1
-                                                )
-                                            },
-                                            icon = {
-                                                Icon(
-                                                    imageVector = screen.icon,
-                                                    contentDescription = screen.title,
-                                                    tint = if (selected) CyberCyan else TextMuted
-                                                )
-                                            },
-                                            modifier = Modifier.testTag(screen.testTag)
-                                        )
-                                    }
-                                }
+                            if (!isImeVisible) {
+                                AppBottomNavigationBar(
+                                    currentRoute = currentRoute,
+                                    onNavigate = { route -> navController.navigateSingleTopTo(route) }
+                                )
                             }
                         }
                     ) { innerPadding ->

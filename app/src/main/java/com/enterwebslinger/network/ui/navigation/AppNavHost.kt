@@ -1,6 +1,9 @@
 // === FILE: app/src/main/java/com/enterwebslinger/network/ui/navigation/AppNavHost.kt ===
 package com.enterwebslinger.network.ui.navigation
 
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Build
@@ -16,9 +19,19 @@ import androidx.compose.material.icons.filled.Timeline
 import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material.icons.filled.WifiFind
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ScrollableTabRow
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -52,6 +65,10 @@ import com.enterwebslinger.network.ui.screens.vpn.VpnViewModel
 import com.enterwebslinger.network.ui.screens.vpn.VpnWorkbenchScreen
 import com.enterwebslinger.network.ui.screens.wifi.WifiSpeedScreen
 import com.enterwebslinger.network.ui.screens.wifi.WifiSpeedViewModel
+import com.enterwebslinger.network.ui.theme.CardBackground
+import com.enterwebslinger.network.ui.theme.CyberCyan
+import com.enterwebslinger.network.ui.theme.TextMuted
+import com.enterwebslinger.network.ui.theme.TextSecondary
 
 sealed class Screen(
     val route: String,
@@ -191,6 +208,55 @@ fun NavHostController.navigateSingleTopTo(route: String) {
         }
         launchSingleTop = true
         restoreState = true
+    }
+}
+
+@Composable
+fun AppBottomNavigationBar(
+    currentRoute: String,
+    onNavigate: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier
+            .testTag("bottom_nav_bar")
+            .windowInsetsPadding(WindowInsets.navigationBars),
+        color = CardBackground,
+        tonalElevation = 8.dp
+    ) {
+        val selectedIndex = BottomNavDestinations.indexOfFirst { it.route == currentRoute }.coerceAtLeast(0)
+        ScrollableTabRow(
+            selectedTabIndex = selectedIndex,
+            edgePadding = 16.dp,
+            containerColor = CardBackground,
+            contentColor = CyberCyan,
+            divider = {}
+        ) {
+            BottomNavDestinations.forEach { screen ->
+                val selected = currentRoute == screen.route
+                Tab(
+                    selected = selected,
+                    onClick = { onNavigate(screen.route) },
+                    text = {
+                        Text(
+                            text = screen.title,
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                            color = if (selected) CyberCyan else TextSecondary,
+                            maxLines = 1
+                        )
+                    },
+                    icon = {
+                        Icon(
+                            imageVector = screen.icon,
+                            contentDescription = screen.title,
+                            tint = if (selected) CyberCyan else TextMuted
+                        )
+                    },
+                    modifier = Modifier.testTag(screen.testTag)
+                )
+            }
+        }
     }
 }
 

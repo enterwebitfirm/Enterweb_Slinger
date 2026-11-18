@@ -1,7 +1,10 @@
 // === FILE: app/src/main/java/com/enterwebslinger/network/data/repository/NetworkTopologyRepository.kt ===
 package com.enterwebslinger.network.data.repository
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
+import android.location.LocationManager
 import android.net.ConnectivityManager
 import android.net.LinkProperties
 import android.net.Network
@@ -11,6 +14,7 @@ import android.net.wifi.WifiInfo
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.util.Log
+import androidx.core.content.ContextCompat
 import com.enterwebslinger.network.core.util.NetworkUtils
 import com.enterwebslinger.network.domain.model.NetworkTopologyState
 import com.enterwebslinger.network.domain.model.RssiDataPoint
@@ -45,6 +49,8 @@ class NetworkTopologyRepository(
         context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
     private val wifiManager =
         context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+    private val locationManager =
+        context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
 
     private val okHttpClient = OkHttpClient.Builder()
         .connectTimeout(4, TimeUnit.SECONDS)
@@ -89,10 +95,12 @@ class NetworkTopologyRepository(
         }
 
         try {
-            val request = NetworkRequest.Builder()
+            val requestBuilder = NetworkRequest.Builder()
                 .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-                .build()
-            cm.registerNetworkCallback(request, networkCallback)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                requestBuilder.setIncludeOtherUidNetworks(true)
+            }
+            cm.registerNetworkCallback(requestBuilder.build(), networkCallback)
         } catch (_: Exception) {
             try {
                 cm.registerDefaultNetworkCallback(networkCallback)
@@ -358,13 +366,18 @@ class NetworkTopologyRepository(
                     val prefix = linkAddr.prefixLength.coerceIn(0, 32)
                     subnetCidr = prefix.toString()
                     subnetMask = cidrToSubnetMask(prefix)
-                } else if (addr is Inet6Address && !addr.isLoopbackAddress && !addr.isLinkLocalAddress) {
-                    localIpv6 = addr.hostAddress ?: localIpv6
+                } else if (addr is Inet6Address && !addr.isLoopbackAddress) {
+                    val hostAddr = addr.hostAddress ?: continue
+                    if (!addr.isLinkLocalAddress) {
+                        localIpv6 = hostAddr.substringBefore("%")
+                    } else if (localIpv6 == "Unavailable") {
+                        localIpv6 = "${hostAddr.substringBefore("%")} (Link-Local)"
+                    }
                 }
             }
         }
 
-        if (localIpv4 == "Unavailable") {
+        if (localIpv4 == "Unavailable" || localIpv6 == "Unavailable") {
             try {
                 val interfaces = NetworkInterface.getNetworkInterfaces()
                 while (interfaces != null && interfaces.hasMoreElements()) {
@@ -372,17 +385,22 @@ class NetworkTopologyRepository(
                     if (nif.isLoopback || !nif.isUp) continue
                     for (ifaceAddr in nif.interfaceAddresses) {
                         val inet = ifaceAddr.address
-                        if (inet is Inet4Address && !inet.isLoopbackAddress) {
+                        if (inet is Inet4Address && !inet.isLoopbackAddress && localIpv4 == "Unavailable") {
                             localIpv4 = inet.hostAddress ?: localIpv4
                             if (subnetCidr.isBlank()) {
                                 val prefix = ifaceAddr.networkPrefixLength.toInt().coerceIn(0, 32)
                                 subnetCidr = prefix.toString()
                                 subnetMask = cidrToSubnetMask(prefix)
                             }
-                            break
+                        } else if (inet is Inet6Address && !inet.isLoopbackAddress && localIpv6 == "Unavailable") {
+                            val ipStr = inet.hostAddress?.substringBefore("%") ?: continue
+                            if (!inet.isLinkLocalAddress) {
+                                localIpv6 = ipStr
+                            } else {
+                                localIpv6 = "$ipStr (Link-Local)"
+                            }
                         }
                     }
-                    if (localIpv4 != "Unavailable") break
                 }
             } catch (_: Exception) {}
         }
@@ -400,14 +418,39 @@ class NetworkTopologyRepository(
             val info: WifiInfo? = getActiveWifiInfo()
             if (info != null) {
                 val rawSsid = info.ssid ?: ""
-                ssid = if (rawSsid.startsWith("\"") && rawSsid.endsWith("\"") && rawSsid.length > 2) {
+                val cleanedSsid = if (rawSsid.startsWith("\"") && rawSsid.endsWith("\"") && rawSsid.length > 2) {
                     rawSsid.substring(1, rawSsid.length - 1)
-                } else if (rawSsid.isNotBlank() && rawSsid != "<unknown ssid>") {
-                    rawSsid
                 } else {
-                    "Unknown SSID"
+                    rawSsid
                 }
-                bssid = info.bssid ?: bssid
+
+                val locEnabled = runCatching {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                        locationManager?.isLocationEnabled == true
+                    } else true
+                }.getOrDefault(true)
+
+                val hasFineLocation = ContextCompat.checkSelfPermission(
+                    context, Manifest.permission.ACCESS_FINE_LOCATION
+                ) == PackageManager.PERMISSION_GRANTED
+
+                if (cleanedSsid.isBlank() || cleanedSsid == "<unknown ssid>") {
+                    ssid = if (!locEnabled || !hasFineLocation) {
+                        "Wi-Fi Connected (Location Masked)"
+                    } else {
+                        "Wi-Fi Connected (5 GHz)"
+                    }
+                } else {
+                    ssid = cleanedSsid
+                }
+
+                val rawBssid = info.bssid ?: "--:--:--:--:--:--"
+                bssid = if (rawBssid == "02:00:00:00:00:00" || rawBssid.isBlank()) {
+                    if (!locEnabled || !hasFineLocation) "BSSID Masked (Enable Location/GPS)" else rawBssid
+                } else {
+                    rawBssid
+                }
+
                 rssi = info.rssi
                 linkSpeed = info.linkSpeed
                 freqMhz = info.frequency

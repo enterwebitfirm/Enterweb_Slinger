@@ -1,4 +1,4 @@
-// === FILE: app/src/main/java/com/enterwebslinger/network/ui/components/CanvasCharts.kt ===
+// === FILE: app/src/main/java/com/enterwebslinger/network/ui/components/TelemetryCharts.kt ===
 package com.enterwebslinger.network.ui.components
 
 import androidx.compose.foundation.Canvas
@@ -18,6 +18,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -47,7 +48,8 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 /**
- * Real-time Wi-Fi RSSI (dBm) & Link Speed line chart over rolling 60-second window
+ * Real-time Wi-Fi RSSI (dBm) & Link Speed line chart over rolling 60-second window.
+ * Fixed: Y-axis domain [-100f, -25f] with 12.dp internal padding and clipToBounds() to prevent top/right clipping.
  */
 @Composable
 fun RealtimeSignalChart(
@@ -71,14 +73,21 @@ fun RealtimeSignalChart(
                 )
             }
         } else {
-            Canvas(modifier = Modifier.fillMaxSize().testTag("signal_chart_canvas")) {
+            Canvas(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(top = 12.dp, bottom = 12.dp, end = 12.dp)
+                    .clipToBounds()
+                    .testTag("signal_chart_canvas")
+            ) {
                 val w = size.width
                 val h = size.height
                 if (w <= 0f || h <= 0f || dataPoints.size < 2) return@Canvas
 
-                val gridDbm = listOf(-40, -60, -80, -100)
+                val gridDbm = listOf(-30, -50, -75, -100)
                 gridDbm.forEach { dbm ->
-                    val rawY = ((dbm - (-30f)) / (-100f - (-30f))) * h
+                    // Expanded dBm domain [-100f, -25f]
+                    val rawY = ((dbm.toFloat() - (-25f)) / (-100f - (-25f))) * h
                     val y = if (rawY.isNaN() || rawY.isInfinite()) 0f else rawY.coerceIn(0f, h)
                     drawLine(
                         color = BorderStrokeColor.copy(alpha = 0.5f),
@@ -95,7 +104,7 @@ fun RealtimeSignalChart(
                 }
 
                 dataPoints.forEachIndexed { index, dp ->
-                    val normY = ((dp.rssiDbm.toFloat() - (-30f)) / (-100f - (-30f))).coerceIn(0f, 1f)
+                    val normY = ((dp.rssiDbm.toFloat() - (-25f)) / (-100f - (-25f))).coerceIn(0f, 1f)
                     val rawX = index * stepX
                     val rawY = normY * h
                     val x = if (rawX.isNaN() || rawX.isInfinite()) 0f else rawX.coerceIn(0f, w)
@@ -158,7 +167,9 @@ fun RealtimeSignalChart(
 }
 
 /**
- * High-precision Speedometer Gauge Canvas Component
+ * High-precision Speedometer Gauge Canvas Component.
+ * Fixed: Perimeter-truncated radial needle (0.65f * radius to 0.88f * radius) along arc track, center pivot circle omitted
+ * so the center readout ("88.1 Mbps") is 100% unobstructed.
  */
 @Composable
 fun SpeedometerGauge(
@@ -213,21 +224,20 @@ fun SpeedometerGauge(
             }
 
             val needleAngleRad = Math.toRadians((startAngle + activeSweep).toDouble())
-            val rawNx = (center.x + (radius - 12.dp.toPx()) * cos(needleAngleRad)).toFloat()
-            val rawNy = (center.y + (radius - 12.dp.toPx()) * sin(needleAngleRad)).toFloat()
-            val nx = if (rawNx.isNaN() || rawNx.isInfinite()) center.x else rawNx
-            val ny = if (rawNy.isNaN() || rawNy.isInfinite()) center.y else rawNy
-            val needleEnd = Offset(nx, ny)
+            val cosVal = cos(needleAngleRad).toFloat()
+            val sinVal = sin(needleAngleRad).toFloat()
+
+            // Perimeter-truncated needle from 0.65f * radius to 0.88f * radius (omits center pivot entirely)
+            val innerNeedle = Offset(center.x + (radius * 0.65f) * cosVal, center.y + (radius * 0.65f) * sinVal)
+            val outerNeedle = Offset(center.x + (radius * 0.88f) * cosVal, center.y + (radius * 0.88f) * sinVal)
 
             drawLine(
                 color = Color.White,
-                start = center,
-                end = needleEnd,
-                strokeWidth = 3.dp.toPx(),
+                start = innerNeedle,
+                end = outerNeedle,
+                strokeWidth = 4.dp.toPx(),
                 cap = StrokeCap.Round
             )
-            drawCircle(color = CyberCyan, radius = 7.dp.toPx(), center = center)
-            drawCircle(color = Color.White, radius = 3.dp.toPx(), center = center)
         }
 
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -299,7 +309,8 @@ fun LatencyBarChart(
 }
 
 /**
- * Wi-Fi Channel Spectrum Parabolic Curves Canvas (Ubiquiti WiFiman style)
+ * Wi-Fi Channel Spectrum Parabolic Curves Canvas (Ubiquiti WiFiman style).
+ * Fixed: 20.dp internal horizontal padding and clipToBounds(), with 24.dp bottom margin reserved for text labels.
  */
 @Composable
 fun WifiChannelGraph(
@@ -314,14 +325,19 @@ fun WifiChannelGraph(
             .padding(12.dp)
             .testTag("wifi_channel_graph")
     ) {
-        Canvas(modifier = Modifier.fillMaxSize()) {
+        Canvas(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(start = 20.dp, end = 20.dp, bottom = 24.dp)
+                .clipToBounds()
+        ) {
             val w = size.width
             val h = size.height
             if (w <= 0f || h <= 0f || entries.isEmpty()) return@Canvas
 
             val levels = listOf(-30, -50, -70, -90)
             levels.forEach { dbm ->
-                val rawY = ((dbm - (-20f)) / (-100f - (-20f))) * h
+                val rawY = ((dbm.toFloat() - (-20f)) / (-100f - (-20f))) * h
                 val y = if (rawY.isNaN() || rawY.isInfinite()) 0f else rawY.coerceIn(0f, h)
                 drawLine(
                     color = BorderStrokeColor.copy(alpha = 0.4f),
@@ -382,13 +398,143 @@ fun WifiChannelGraph(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .align(Alignment.BottomCenter),
+                .align(Alignment.BottomCenter)
+                .padding(horizontal = 16.dp, vertical = 2.dp),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text("Ch 1", style = MaterialTheme.typography.labelSmall, color = TextMuted)
             Text("Ch 6", style = MaterialTheme.typography.labelSmall, color = TextMuted)
             Text("Ch 11", style = MaterialTheme.typography.labelSmall, color = TextMuted)
             Text("Ch 36+", style = MaterialTheme.typography.labelSmall, color = TextMuted)
+        }
+    }
+}
+
+/**
+ * Real-Time Interface TrafficStats Dual-Line Throughput Chart (RX/TX).
+ * Fixed: Normalized against max rate (min 1024 bytes/sec), with Emerald for RX and Cyan for TX with translucent gradient fills.
+ */
+@Composable
+fun RealtimeTrafficChart(
+    rxPoints: List<Float>,
+    txPoints: List<Float>,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(160.dp)
+            .background(CardBackground, RoundedCornerShape(12.dp))
+            .padding(12.dp)
+            .testTag("realtime_traffic_chart")
+    ) {
+        if (rxPoints.isEmpty() && txPoints.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(
+                    text = "Awaiting TrafficStats interface bytes...",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextMuted
+                )
+            }
+        } else {
+            Canvas(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(vertical = 8.dp)
+                    .clipToBounds()
+            ) {
+                val w = size.width
+                val h = size.height
+                if (w <= 0f || h <= 0f) return@Canvas
+
+                val combined = rxPoints + txPoints
+                val maxRate = (combined.maxOrNull() ?: 1024f).coerceAtLeast(1024f)
+
+                val rxPath = Path()
+                val rxFill = Path()
+                val txPath = Path()
+                val txFill = Path()
+
+                val maxPoints = maxOf(rxPoints.size, txPoints.size).coerceAtLeast(2)
+                val stepX = w / (maxPoints - 1).coerceAtLeast(1)
+
+                if (rxPoints.isNotEmpty()) {
+                    rxPoints.forEachIndexed { index, rate ->
+                        val normY = (1f - (rate / maxRate)).coerceIn(0f, 1f)
+                        val x = index * stepX
+                        val y = normY * h
+                        if (index == 0) {
+                            rxPath.moveTo(x, y)
+                            rxFill.moveTo(x, h)
+                            rxFill.lineTo(x, y)
+                        } else {
+                            rxPath.lineTo(x, y)
+                            rxFill.lineTo(x, y)
+                        }
+                        if (index == rxPoints.size - 1) {
+                            rxFill.lineTo(x, h)
+                            rxFill.close()
+                        }
+                    }
+                    drawPath(
+                        path = rxFill,
+                        brush = Brush.verticalGradient(
+                            colors = listOf(StatusEmerald.copy(alpha = 0.3f), Color.Transparent),
+                            startY = 0f,
+                            endY = h
+                        )
+                    )
+                    drawPath(
+                        path = rxPath,
+                        color = StatusEmerald,
+                        style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round)
+                    )
+                }
+
+                if (txPoints.isNotEmpty()) {
+                    txPoints.forEachIndexed { index, rate ->
+                        val normY = (1f - (rate / maxRate)).coerceIn(0f, 1f)
+                        val x = index * stepX
+                        val y = normY * h
+                        if (index == 0) {
+                            txPath.moveTo(x, y)
+                            txFill.moveTo(x, h)
+                            txFill.lineTo(x, y)
+                        } else {
+                            txPath.lineTo(x, y)
+                            txFill.lineTo(x, y)
+                        }
+                        if (index == txPoints.size - 1) {
+                            txFill.lineTo(x, h)
+                            txFill.close()
+                        }
+                    }
+                    drawPath(
+                        path = txFill,
+                        brush = Brush.verticalGradient(
+                            colors = listOf(CyberCyan.copy(alpha = 0.25f), Color.Transparent),
+                            startY = 0f,
+                            endY = h
+                        )
+                    )
+                    drawPath(
+                        path = txPath,
+                        color = CyberCyan,
+                        style = Stroke(width = 2.2.dp.toPx(), cap = StrokeCap.Round)
+                    )
+                }
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.BottomCenter)
+                    .padding(horizontal = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("RX (Emerald)", style = MaterialTheme.typography.labelSmall, color = StatusEmerald)
+                Text("TX (Cyan)", style = MaterialTheme.typography.labelSmall, color = CyberCyan)
+            }
         }
     }
 }

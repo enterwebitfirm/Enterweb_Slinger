@@ -37,9 +37,17 @@ import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.security.SecureRandom
+import java.security.cert.X509Certificate
 import java.util.UUID
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicInteger
+import javax.net.ssl.SNIHostName
+import javax.net.ssl.SSLContext
+import javax.net.ssl.SSLSocket
+import javax.net.ssl.SSLSocketFactory
+import javax.net.ssl.TrustManager
+import javax.net.ssl.X509TrustManager
 
 class SecurityRepository(
     private val scope: CoroutineScope,
@@ -152,6 +160,7 @@ class SecurityRepository(
             try {
                 val addr = InetAddress.getByName(cleanTarget)
                 val targetIp = addr.hostAddress ?: cleanTarget
+                val isPrivateIp = isPrivateOrLocalIp(targetIp)
 
                 val openPortsQueue = ConcurrentLinkedQueue<PortScanResult>()
                 val semaphore = Semaphore(128)
@@ -161,14 +170,14 @@ class SecurityRepository(
                 val tasks = ports.map { port ->
                     async {
                         semaphore.withPermit {
-                            val banner = probePortAndGrabBanner(targetIp, port, 450)
+                            val banner = probePortAndGrabBanner(targetIp, cleanTarget, port, 600, isPrivateIp)
                             val isOpen = banner != null
                             val completed = counter.incrementAndGet()
                             _portScanProgress.value = completed.toFloat() / total
 
                             if (isOpen) {
                                 val serviceName = NetworkUtils.WELL_KNOWN_PORTS[port] ?: "Custom Service"
-                                val isHttp = NetworkUtils.isHttpPort(port)
+                                val isHttp = NetworkUtils.isHttpPort(port) || port in listOf(443, 8443)
                                 val item = PortScanResult(
                                     port = port,
                                     serviceName = serviceName,
@@ -215,40 +224,140 @@ class SecurityRepository(
         }
     }
 
-    /**
-     * Returns empty string when port is open without banner, trimmed banner string when captured,
-     * or null if connection failed / port closed.
-     */
-    private fun probePortAndGrabBanner(ip: String, port: Int, timeoutMs: Int): String? {
+    private fun isPrivateOrLocalIp(ip: String): Boolean {
         return try {
-            Socket().use { socket ->
-                socket.connect(InetSocketAddress(ip, port), timeoutMs)
-                socket.soTimeout = 700
-                try {
-                    val reader = BufferedReader(InputStreamReader(socket.getInputStream(), Charsets.UTF_8))
+            val addr = InetAddress.getByName(ip)
+            addr.isSiteLocalAddress || addr.isLoopbackAddress || ip.startsWith("10.") || ip.startsWith("192.168.") || ip.startsWith("172.")
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun probePortAndGrabBanner(ip: String, host: String, port: Int, timeoutMs: Int, isPrivateIp: Boolean): String? {
+        val tlsPorts = listOf(443, 8443, 853, 993, 995, 465, 636)
+        val serverSpeaksFirstPorts = mapOf(
+            21 to "220",
+            22 to "SSH-",
+            25 to "220",
+            110 to "+OK",
+            143 to "* OK"
+        )
+
+        return try {
+            if (tlsPorts.contains(port)) {
+                val factory = buildTrustAllSocketFactory()
+                val socket = (factory.createSocket() as SSLSocket).apply {
+                    soTimeout = timeoutMs
+                    runCatching {
+                        val params = sslParameters
+                        params.serverNames = listOf(SNIHostName(host))
+                        sslParameters = params
+                    }
+                    connect(InetSocketAddress(ip, port), timeoutMs)
+                    startHandshake()
+                }
+                socket.use { sslSock ->
+                    if (port == 443 || port == 8443) {
+                        val writer = OutputStreamWriter(sslSock.outputStream, Charsets.US_ASCII)
+                        writer.write("HEAD / HTTP/1.1\r\nHost: $host\r\nConnection: close\r\n\r\n")
+                        writer.flush()
+                        val reader = BufferedReader(InputStreamReader(sslSock.inputStream, Charsets.UTF_8))
+                        val line = reader.readLine()?.trim().orEmpty()
+                        val cipher = sslSock.session?.cipherSuite ?: "TLS"
+                        if (line.startsWith("HTTP/", true)) {
+                            "$line ($cipher)"
+                        } else {
+                            "TLS Handshake OK ($cipher)"
+                        }
+                    } else {
+                        "TLS Handshake OK (${sslSock.session?.cipherSuite ?: "Secure"})"
+                    }
+                }
+            } else {
+                Socket().use { socket ->
+                    socket.connect(InetSocketAddress(ip, port), timeoutMs)
+                    socket.soTimeout = 800
+                    val inputStream = socket.inputStream
+                    val reader = BufferedReader(InputStreamReader(inputStream, Charsets.UTF_8))
+
+                    if (serverSpeaksFirstPorts.containsKey(port) && !isPrivateIp) {
+                        val firstLine = reader.readLine()?.trim().orEmpty()
+                        val expectedPrefix = serverSpeaksFirstPorts[port]!!
+                        if (firstLine.isBlank() || !firstLine.startsWith(expectedPrefix, ignoreCase = true)) {
+                            // Transparent ISP proxy or fake open state filter
+                            return null
+                        }
+                        return firstLine.replace(Regex("[^\\x20-\\x7E]"), "").take(100)
+                    }
+
                     if (NetworkUtils.isHttpPort(port)) {
-                        val writer = OutputStreamWriter(socket.getOutputStream(), Charsets.UTF_8)
-                        writer.write("HEAD / HTTP/1.0\r\nHost: $ip\r\nConnection: close\r\n\r\n")
+                        val writer = OutputStreamWriter(socket.outputStream, Charsets.UTF_8)
+                        writer.write("HEAD / HTTP/1.0\r\nHost: $host\r\nConnection: close\r\n\r\n")
                         writer.flush()
                         val lines = mutableListOf<String>()
-                        repeat(5) {
+                        repeat(4) {
                             val line = reader.readLine() ?: return@repeat
                             if (line.startsWith("HTTP/", true) || line.startsWith("Server:", true)) {
                                 lines.add(line.trim())
                             }
                         }
-                        lines.joinToString(" • ").take(120)
+                        lines.joinToString(" • ").take(120).ifBlank { "" }
                     } else {
-                        val firstLine = reader.readLine()?.trim() ?: ""
-                        firstLine.replace(Regex("[^\\x20-\\x7E]"), "").take(120)
+                        val firstLine = reader.readLine()?.trim().orEmpty()
+                        firstLine.replace(Regex("[^\\x20-\\x7E]"), "").take(100)
                     }
-                } catch (_: Exception) {
-                    ""
                 }
             }
         } catch (_: Exception) {
             null
         }
+    }
+
+    fun inspectTlsCertificate(host: String, port: Int, sniOverride: String? = null): Result<Map<String, Any>> = runCatching {
+        val cleanHost = host.trim()
+        val sni = sniOverride?.takeIf { it.isNotBlank() } ?: cleanHost
+        val factory = buildTrustAllSocketFactory()
+        var sslSocket: SSLSocket? = null
+        try {
+            sslSocket = (factory.createSocket() as SSLSocket).apply {
+                soTimeout = 5000
+                runCatching {
+                    val params = sslParameters
+                    params.serverNames = listOf(SNIHostName(sni))
+                    sslParameters = params
+                }
+                connect(InetSocketAddress(cleanHost, port), 5000)
+                startHandshake()
+            }
+            val certs = sslSocket.session?.peerCertificates
+            val cert = certs?.firstOrNull() as? X509Certificate
+                ?: throw IllegalStateException("No X.509 peer certificates presented by $cleanHost:$port")
+
+            mapOf(
+                "subject" to cert.subjectX500Principal.name,
+                "issuer" to cert.issuerX500Principal.name,
+                "version" to cert.version,
+                "serialNumber" to cert.serialNumber.toString(16),
+                "notBefore" to cert.notBefore.toString(),
+                "notAfter" to cert.notAfter.toString(),
+                "sigAlgName" to cert.sigAlgName,
+                "cipherSuite" to (sslSocket.session?.cipherSuite ?: "Unknown"),
+                "protocol" to (sslSocket.session?.protocol ?: "TLS")
+            )
+        } finally {
+            NetworkByteUtils.safeClose(sslSocket)
+        }
+    }
+
+    private fun buildTrustAllSocketFactory(): SSLSocketFactory {
+        val trustAll = arrayOf<TrustManager>(object : X509TrustManager {
+            override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) {}
+            override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {}
+            override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
+        })
+        return SSLContext.getInstance("TLS").apply {
+            init(null, trustAll, SecureRandom())
+        }.socketFactory
     }
 
     suspend fun sendWakeOnLan(macAddress: String, customBroadcastIp: String? = null): Result<String> = withContext(Dispatchers.IO) {
